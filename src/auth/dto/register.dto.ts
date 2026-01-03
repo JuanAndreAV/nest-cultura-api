@@ -11,10 +11,10 @@ export class RegisterDto {
   @IsString({message: "El nombre completo es obligatorio"})
     @MinLength(10, { message: 'El nombre completo debe tener al menos 10 caracteres' })
     @MaxLength(50, { message: 'El nombre completo es muy largo' })
-    fullName: string;
+    nombre: string;
 
   @IsOptional()
-  @IsEnum(['admin', 'profesor','estudiante'], { message: 'Rol no válido' })
+  @IsEnum(['admin', 'profesor'], { message: 'Rol no válido' })
   role?: string;
 
 }

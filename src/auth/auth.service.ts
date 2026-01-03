@@ -1,26 +1,83 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuthDto } from './dto/register.dto';
-import { UpdateAuthDto } from './dto/login.dto';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+
+import { InjectRepository } from '@nestjs/typeorm';
+
+import { Repository } from 'typeorm';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { User } from './entities/user.entity';
 
 @Injectable()
 export class AuthService {
-  create(createAuthDto: CreateAuthDto) {
-    return 'This action adds a new auth';
+  private supabaseClient: SupabaseClient;
+  constructor(
+  @InjectRepository(User)
+  private readonly userRepository: Repository<User>,
+ ){
+   this.supabaseClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+   
+ }
+ 
+
+ 
+ async login(loginDto: LoginDto) {
+    const { email, password } = loginDto;
+
+    const { data, error } = await this.supabaseClient.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) throw new UnauthorizedException('Credenciales inválidas');
+
+    // Devolvemos el access_token que el frontend usará en sus cabeceras
+    return {
+      access_token: data.session.access_token,
+      user: data.user,
+    };
   }
 
-  findAll() {
-    return `This action returns all auth`;
-  }
+  async register( registerDto: RegisterDto) {
+   
+try{
+   const { email, password,role, nombre } = registerDto;
+  const user = await this.userRepository.findOne({ where: { email: email.toLowerCase() } });
 
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
-  }
+    if (user) {
+      console.log('Usuario encontrado en DB:', user);
+      // Es importante lanzar la excepción aquí para detener el proceso
+      throw new BadRequestException(`El correo ${email} ya está registrado.`);
+    }
 
-  update(id: number, updateAuthDto: UpdateAuthDto) {
-    return `This action updates a #${id} auth`;
-  }
+  const { data, error } = await this.supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        role: role || "profesor",
+        nombre,
+      },
+    },
+  })
+  if (error) throw new UnauthorizedException('Error en el registro: ' + error.message);
 
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
-  }
+  return {
+    access_token: data.session?.access_token,
+    user: data.user,
+  };
+  }catch(error){
+    throw new UnauthorizedException('Error en el registro: ' + error.message);
+
 }
+
+}
+}
+
+
+ 
+  // update(id: number, updateAuthDto: UpdateAuthDto) {
+  //   return `This action updates a #${id} auth`;
+  // }
+
+ 
