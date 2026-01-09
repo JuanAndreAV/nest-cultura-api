@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
 
@@ -70,8 +70,28 @@ try{
     throw new UnauthorizedException('Error en el registro: ' + error.message);
 
 }
-
 }
+ async getUserFullProfile(userId: string) {
+  // Simplemente retornar el userId que ya validamos en el guard
+  // Si necesitas más datos, consúltalos de tu tabla de perfiles
+  
+  const { data: profile, error } = await this.supabaseClient
+    .from('users') // Asume que tienes una tabla profiles
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (error) {
+    // Si no tienes tabla profiles, simplemente retorna lo básico
+    return {
+      userId,
+      message: 'Usuario autenticado correctamente'
+    };
+  }
+
+  return profile;
+}
+
 }
 
 
