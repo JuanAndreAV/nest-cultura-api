@@ -33,7 +33,7 @@ export class AuthController {
 
   @Get()
   findAll() {
-    return "hola desde nest";
+    return "hola desde nestJs";
   }
 
  
