@@ -1,7 +1,12 @@
 # Settings for Backend (on Cloud Run).
-# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+kind: AppHostingConfiguration
+version: v1
+
 runConfig:
-  minInstances: 0
+  # Esto fuerza a que use el JS compilado y no el CLI de Nest
+  runCommand: npm run start:prod
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+
   # maxInstances: 100
   # concurrency: 80
   # cpu: 1
