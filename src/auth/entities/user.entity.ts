@@ -1,3 +1,4 @@
+// user.entity.ts
 import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn } from "typeorm";
 
 @Entity('users')
@@ -5,33 +6,35 @@ export class User {
   @PrimaryColumn('uuid')
   id: string;
 
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   email: string;
 
-  @Column({ nullable: true })
-  nombre: string;
+  @Column({ type: 'varchar', nullable: true })
+  nombre: string | null;
 
-  @Column({ nullable: true })
-  apellido: string;
+  @Column({ type: 'varchar', nullable: true })
+  apellido: string | null;
 
-  @Column({ nullable: true, unique: true })
-  documento: string;
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  documento: string | null;
 
-  @Column({ nullable: true, type: 'date', name: 'fecha_nacimiento' })
-  fechaNacimiento: Date;
+  @Column({ type: 'date', nullable: true, name: 'fecha_nacimiento' })
+  fechaNacimiento: Date | null;
 
-  @Column({ nullable: true })
-  telefono: string;
+  @Column({ type: 'varchar', nullable: true })
+  telefono: string | null;
 
-  @Column({ nullable: true, name: 'foto_url' })
-  fotoUrl: string;
+  @Column({ type: 'varchar', nullable: true, name: 'foto_url' })
+  fotoUrl: string | null;
 
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   activo: boolean;
+
+  @Column({ type: 'boolean', default: false, name: 'email_ficticio' })
+  emailFicticio: boolean;
 
   @Column({
     type: 'enum',
-    // Incluye 'profesor' para no romper datos existentes en producción
     enum: ['admin', 'docente', 'estudiante', 'profesor'],
     default: 'estudiante',
   })

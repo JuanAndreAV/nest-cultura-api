@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ProgramasModule } from './programas/programas.module';
 
 @Module({
   imports: [AuthModule,
@@ -33,6 +34,7 @@ import { ConfigService } from '@nestjs/config';
         },
       }),
     }),
+    ProgramasModule,
   ],
   controllers: [],
   providers: [],

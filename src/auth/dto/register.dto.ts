@@ -1,20 +1,34 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class RegisterDto {
-    @IsEmail({}, { message: 'El correo electrónico no es válido' })
-  email: string;
+  // Email opcional — si no viene, se genera uno ficticio con el documento
+  @ValidateIf(o => !o.documento)
+  @IsEmail()
+  email?: string;
 
   @IsString()
-  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
+  @MinLength(6)
   password: string;
 
-  @IsString({message: "El nombre completo es obligatorio"})
-    @MinLength(10, { message: 'El nombre completo debe tener al menos 10 caracteres' })
-    @MaxLength(50, { message: 'El nombre completo es muy largo' })
-    nombre: string;
+  @IsString()
+  nombre: string;
 
+  @IsString()
+  apellido: string;
+
+  // Documento requerido si no hay email
+  @ValidateIf(o => !o.email)
+  @IsString()
+  documento?: string;
+
+  @IsEnum(['admin', 'docente', 'estudiante'])
   @IsOptional()
-  @IsEnum(['admin', 'profesor'], { message: 'Rol no válido' })
   role?: string;
-
 }
