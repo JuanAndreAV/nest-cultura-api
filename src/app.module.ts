@@ -7,6 +7,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ProgramasModule } from './programas/programas.module';
+import { MigrationModule } from './migration/migration.module';
 
 @Module({
   imports: [AuthModule,
@@ -28,13 +29,14 @@ import { ProgramasModule } from './programas/programas.module';
         // Cargará automáticamente archivos .entity.ts o .entity.js
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         // Sincroniza las tablas con tus entidades (Desactivar en prod)
-        synchronize: true, 
+        synchronize: false, 
         ssl: {
           rejectUnauthorized: false, // Requerido para conexiones seguras con Supabase
         },
       }),
     }),
     ProgramasModule,
+    MigrationModule,
   ],
   controllers: [],
   providers: [],

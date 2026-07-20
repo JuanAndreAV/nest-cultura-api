@@ -25,7 +25,7 @@ export class AuthService {
   ) {
     this.supabaseClient = createClient(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );
   }
 
@@ -57,7 +57,7 @@ export class AuthService {
   // REGISTER
   // Soporta registro con email real o sin email (genera ficticio)
   // ----------------------------------------------------------------
-  async register(registerDto: RegisterDto) {
+ async register(registerDto: RegisterDto) {
     try {
       const { password, role, nombre, apellido, documento } = registerDto;
 
@@ -95,28 +95,32 @@ export class AuthService {
       });
 
       if (error) {
+        const message = error?.message ?? String(error ?? 'Error desconocido');
+        console.log('Error en signUp:', message);
         throw new BadRequestException('Error en el registro: ' + error.message);
       }
 
       const userId = data.user!.id;
-
-      // Completar public.users con los datos adicionales
-      // El trigger ya creó la fila básica al hacer signUp
-      await this.userRepository.update(userId, {
-        apellido:      apellido ?? null,
-        documento:     documento ?? null,
-        emailFicticio:  esFicticio,
-      });
-
-      // Asignar rol en usuario_roles
       const rolNormalizado = this.normalizarRol(role || 'estudiante');
-      await this.rolRepository
-        .createQueryBuilder()
-        .insert()
-        .into(UsuarioRol)
-        .values({ usuarioId: userId, rol: rolNormalizado })
-        .orIgnore()
-        .execute();
+
+      // LE DAMOS UN PEQUEÑO RESPIRÓ A LA BD (Opcional, por si la replicación tarda milisegundos)
+      // Completar public.users con los datos adicionales
+      try {
+        await this.userRepository.update(userId, {
+          apellido:      apellido ?? null,
+          documento:     documento ?? null,
+          emailFicticio:  esFicticio,
+        });
+      } catch (dbError) {
+        this.logger.error(`Error actualizando campos adicionales para ${userId}:`, dbError);
+        // No bloqueamos el flujo si el auth de Supabase fue exitoso
+      }
+
+      // =================================================================
+      // ❌ BORRAMOS EL REPOSITORIO DE ROL DESDE AQUÍ ❌
+      // El trigger 'on_auth_user_created' de Supabase ya insertó esto por debajo.
+      // Intentar meterlo aquí causa el error de llave foránea / concurrencia.
+      // =================================================================
 
       return {
         access_token:  data.session?.access_token ?? null,
@@ -131,7 +135,6 @@ export class AuthService {
       };
 
     } catch (error: any) {
-      // Relanzar BadRequestException sin envolverla
       if (error instanceof BadRequestException) throw error;
       const message = error?.message ?? String(error ?? 'Error desconocido');
       throw new UnauthorizedException('Error en el registro: ' + message);
@@ -171,7 +174,7 @@ export class AuthService {
       .createQueryBuilder()
       .insert()
       .into(UsuarioRol)
-      .values({ usuarioId, rol: this.normalizarRol(rol) })
+      .values({ usuarioId, role: this.normalizarRol(rol) })
       .orIgnore()
       .execute();
   }
@@ -179,7 +182,7 @@ export class AuthService {
   async removerRol(usuarioId: string, rol: string): Promise<void> {
     await this.rolRepository.delete({
       usuarioId,
-      rol: this.normalizarRol(rol),
+      role: this.normalizarRol(rol),
     });
   }
 

@@ -11,6 +11,12 @@
 		},
 		{
 			"path": "../../../google/build-with-ai-2026"
+		},
+		{
+			"path": "../../../primeros-pasos-docker/app"
+		},
+		{
+			"path": "../../../../../Downloads/artist-landing"
 		}
 	],
 	"settings": {

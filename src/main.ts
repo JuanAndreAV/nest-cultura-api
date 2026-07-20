@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { CommandFactory } from 'nest-commander/src/command.factory';
 
 async function bootstrap() {
   
@@ -17,6 +18,7 @@ async function bootstrap() {
   )
   const port = process.env.PORT || 8080;
   await app.listen(port, '0.0.0.0');
+await CommandFactory.run(AppModule, ['log', 'warn', 'error']);
   
 }
 bootstrap();
