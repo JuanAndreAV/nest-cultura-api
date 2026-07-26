@@ -8,6 +8,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ProgramasModule } from './programas/programas.module';
 import { MigrationModule } from './migration/migration.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
+import { AsignaturasModule } from './asignaturas/asignaturas.module';
+import { AulasModule } from './aulas/aulas.module';
+import { CursosModule } from './cursos/cursos.module';
+import { InscripcionesModule } from './inscripciones/inscripciones.module';
 
 @Module({
   imports: [AuthModule,
@@ -37,6 +42,11 @@ import { MigrationModule } from './migration/migration.module';
     }),
     ProgramasModule,
     MigrationModule,
+    UsuariosModule,
+    AsignaturasModule,
+    AulasModule,
+    CursosModule,
+    InscripcionesModule,
   ],
   controllers: [],
   providers: [],

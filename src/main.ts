@@ -18,7 +18,7 @@ async function bootstrap() {
   )
   const port = process.env.PORT || 8080;
   await app.listen(port, '0.0.0.0');
-await CommandFactory.run(AppModule, ['log', 'warn', 'error']);
+//await CommandFactory.run(AppModule, ['log', 'warn', 'error']);
   
 }
 bootstrap();

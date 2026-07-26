@@ -1,42 +1,85 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller, Get, Post, Put, Delete,
+  Param, Body, UseGuards,
+} from '@nestjs/common';
 import { ProgramasService } from './programas.service';
+import { CreateProgramaDto } from './dto/create-programa.dto';
+import { CreatePeriodoDto } from './dto/create-periodo.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { UseGuards } from '@nestjs/common'; 
-import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
-import { Roles } from 'src/auth/decorators/roles.decorator';
-import { CreateProgramaDto } from './dto/create-programa.dto';
-import { UpdateProgramaDto } from './dto/update-programa.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('programas')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProgramasController {
   constructor(private readonly programasService: ProgramasService) {}
 
+   // ----------------------------------------------------------------
+  // PERIODOS
+  // ----------------------------------------------------------------
+  // Periodos — rutas independientes
+@Post('periodos')
+@Roles('admin')
+crearPeriodo(@Body() dto: CreatePeriodoDto) {
+  return this.programasService.crearPeriodo(dto);
+}
+
+@Get('periodos')
+//@Roles('admin')
+listarPeriodos() {
+  return this.programasService.listarPeriodos();
+}
+
+@Get('periodos/activo')
+periodoActivo() {
+  return this.programasService.periodoActivo();
+}
+
+@Put('periodos/:id')
+@Roles('admin')
+actualizarPeriodo(
+  @Param('id') id: string,
+  @Body() dto: Partial<CreatePeriodoDto>,
+) {
+  return this.programasService.actualizarPeriodo(id, dto);
+}
+
+@Delete('periodos/:id')
+@Roles('admin')
+desactivarPeriodo(@Param('id') id: string) {
+  return this.programasService.desactivarPeriodo(id);
+}
+
+  // ----------------------------------------------------------------
+  // PROGRAMAS
+  // ----------------------------------------------------------------
   @Post()
-  create(@Body() createProgramaDto: CreateProgramaDto) {
-    return this.programasService.create(createProgramaDto);
+  @Roles('admin')
+  crear(@Body() dto: CreateProgramaDto) {
+    return this.programasService.crearPrograma(dto);
   }
 
   @Get()
-  @Roles('admin', 'docente', 'estudiante') // Solo usuarios con estos roles pueden acceder
-  findAll(@CurrentUser() user: any) {
-    return user; // Solo para verificar que el decorador @CurrentUser funciona
-    //return this.programasService.findAll();
+  listar() {
+    return this.programasService.listarProgramas();
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.programasService.findOne(+id);
+  ver(@Param('id') id: string) {
+    return this.programasService.verPrograma(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateProgramaDto: UpdateProgramaDto) {
-    return this.programasService.update(+id, updateProgramaDto);
+  @Put(':id')
+  @Roles('admin')
+  actualizar(@Param('id') id: string, @Body() dto: Partial<CreateProgramaDto>) {
+    return this.programasService.actualizarPrograma(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.programasService.remove(+id);
+  @Roles('admin')
+  desactivar(@Param('id') id: string) {
+    return this.programasService.desactivarPrograma(id);
   }
+
+ 
 }
