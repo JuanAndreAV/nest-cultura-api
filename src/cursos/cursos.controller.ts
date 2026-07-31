@@ -9,11 +9,12 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('cursos')
-@UseGuards(JwtAuthGuard, RolesGuard)
+//@UseGuards(JwtAuthGuard, RolesGuard)
 export class CursosController {
   constructor(private readonly cursosService: CursosService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   crear(@Body() dto: CreateCursoDto) {
     return this.cursosService.crear(dto);
@@ -27,6 +28,18 @@ export class CursosController {
   ) {
     return this.cursosService.listar({ periodoId, asignaturaId, docenteId });
   }
+  @Get('disponibles')
+  cursosDisponibles(
+  @Query('periodoId')  periodoId?: string,
+  @Query('programaId') programaId?: string,
+  @Query('usuarioId')  usuarioId?: string,
+) {
+  return this.cursosService.cursosDisponibles({
+    periodoId,
+    programaId,
+    usuarioId,
+  });
+}
 
   @Get(':id')
   ver(@Param('id') id: string) {
@@ -34,12 +47,14 @@ export class CursosController {
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   actualizar(@Param('id') id: string, @Body() dto: Partial<CreateCursoDto>) {
     return this.cursosService.actualizar(id, dto);
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   desactivar(@Param('id') id: string) {
     return this.cursosService.desactivar(id);
@@ -47,6 +62,7 @@ export class CursosController {
 
   // Horarios
   @Post(':id/horarios')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   agregarHorarios(
     @Param('id') id: string,
@@ -56,12 +72,13 @@ export class CursosController {
   }
 
   @Get(':id/horarios')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   horarios(@Param('id') id: string) {
     return this.cursosService.horariosDelCurso(id);
   }
 
   @Delete('horarios/:id')
-  @Roles('admin', 'docente')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   eliminarHorario(@Param('id') id: string) {
     return this.cursosService.eliminarHorario(id);
   }

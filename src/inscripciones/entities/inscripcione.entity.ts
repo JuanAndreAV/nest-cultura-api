@@ -12,6 +12,7 @@ export enum EstadoInscripcion {
   RETIRADA   = 'retirada',
   SUSPENDIDA = 'suspendida',
   FINALIZADA = 'finalizada',
+  EN_ESPERA   = 'en_espera',
 }
 
 @Entity('inscripciones')
@@ -21,6 +22,8 @@ export class Inscripcion {
 
   @Column({ type: 'uuid', name: 'usuario_id' })
   usuarioId: string;
+
+
   @Column({ type: 'uuid', name: 'curso_id' })
   cursoId: string;
 

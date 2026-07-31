@@ -22,7 +22,7 @@ export class InscripcionesService {
   // PRE-INSCRIPCIÓN (desde link del profesor)
   // ----------------------------------------------------------------
   async preInscribir(dto: CreateInscripcionDto): Promise<Inscripcion> {
-    await this.validarInscripcion(dto.usuarioId, dto.cursoId);
+   await this.validarInscripcion(dto.usuarioId, dto.cursoId);
 
     const inscripcion = this.inscripcionRepository.create({
       usuarioId:     dto.usuarioId,
@@ -154,9 +154,10 @@ export class InscripcionesService {
       where: [
         { usuarioId, cursoId, estado: EstadoInscripcion.ACTIVA },
         { usuarioId, cursoId, estado: EstadoInscripcion.PENDIENTE },
+        
       ],
     });
-
+    
     if (yaInscrito) {
       throw new BadRequestException(
         `El estudiante ya tiene una inscripción ${yaInscrito.estado} en este curso.`,
@@ -164,7 +165,7 @@ export class InscripcionesService {
     }
 
     // Verificar edad
-    const perfil = await this.usuariosService.verificarDocumento('');
+    //const perfil = await this.usuariosService.verificarDocumento('');
     const usuario = await this.inscripcionRepository.manager
       .getRepository('users')
       .findOne({ where: { id: usuarioId } });

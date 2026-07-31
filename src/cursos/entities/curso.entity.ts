@@ -50,7 +50,7 @@ export class Curso {
   requiereNivelPrevio: boolean;
 
   @Column({ type: 'uuid', name: 'curso_prerequisito_id', nullable: true })
-  cursoPrerequisitorId: string | null;
+  cursoPrerequisitoId: string | null;
 
   @Column({ type: 'boolean', default: true })
   activo: boolean;

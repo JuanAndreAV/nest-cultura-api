@@ -71,7 +71,7 @@ export class CreateCursoDto {
 
   @IsUUID()
   @IsOptional()
-  cursoPrerequisitorId?: string;
+  cursoPrerequisitoId?: string;
 
   // Horarios opcionales al crear el curso
   @IsArray()

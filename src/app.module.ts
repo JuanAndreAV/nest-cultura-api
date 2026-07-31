@@ -13,6 +13,9 @@ import { AsignaturasModule } from './asignaturas/asignaturas.module';
 import { AulasModule } from './aulas/aulas.module';
 import { CursosModule } from './cursos/cursos.module';
 import { InscripcionesModule } from './inscripciones/inscripciones.module';
+import { AsistenciasModule } from './asistencias/asistencias.module';
+import { NotasModule } from './notas/notas.module';
+import { ReportesModule } from './reportes/reportes.module';
 
 @Module({
   imports: [AuthModule,
@@ -47,6 +50,9 @@ import { InscripcionesModule } from './inscripciones/inscripciones.module';
     AulasModule,
     CursosModule,
     InscripcionesModule,
+    AsistenciasModule,
+    NotasModule,
+    ReportesModule,
   ],
   controllers: [],
   providers: [],
