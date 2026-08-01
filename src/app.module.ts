@@ -43,7 +43,7 @@ import { ReportesModule } from './reportes/reportes.module';
       }),
     }),
     ProgramasModule,
-    MigrationModule,
+   
     UsuariosModule,
     AsignaturasModule,
     AulasModule,
