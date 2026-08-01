@@ -7,7 +7,6 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ProgramasModule } from './programas/programas.module';
-import { MigrationModule } from './migration/migration.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { AsignaturasModule } from './asignaturas/asignaturas.module';
 import { AulasModule } from './aulas/aulas.module';
