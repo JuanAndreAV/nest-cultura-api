@@ -12,28 +12,37 @@ export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    // Leer los roles requeridos del decorador @Roles()
+    // 1. Leer los roles requeridos del decorador @Roles()
     const rolesRequeridos = this.reflector.getAllAndOverride<string[]>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    // Si la ruta no tiene @Roles(), cualquier usuario autenticado puede acceder
-    if (!rolesRequeridos || rolesRequeridos.length === 0) return true;
+    // 2. Si la ruta no exige roles, permite el acceso
+    if (!rolesRequeridos || rolesRequeridos.length === 0) {
+      return true;
+    }
 
     const { user } = context.switchToHttp().getRequest();
 
-   
-    const tieneRol = rolesRequeridos.some(rol => {
-      if (rol === 'admin')     return user.es_admin;
-      if (rol === 'docente' || rol === 'profesor')   return user.es_docente;
-      if (rol === 'estudiante') return user.es_estudiante;
-      return user.roles?.includes(rol);
-    });
+    // Validar que el usuario esté adjunto a la petición y tenga el arreglo de roles
+    if (!user || !Array.isArray(user.roles)) {
+      throw new ForbiddenException('Acceso denegado. Usuario sin roles asignados.');
+    }
+
+    // 3. Normalizar alias (ej. mapear 'profesor' -> 'docente')
+    const rolesRequeridosNormalizados = rolesRequeridos.map(rol =>
+      rol === 'profesor' ? 'docente' : rol,
+    );
+
+    // 4. Verificar si AL MENOS UNO de los roles requeridos está en user.roles
+    const tieneRol = rolesRequeridosNormalizados.some(rolRequerido =>
+      user.roles.includes(rolRequerido),
+    );
 
     if (!tieneRol) {
       throw new ForbiddenException(
-        `Acceso denegado. Se requiere rol: ${rolesRequeridos.join(' o ')}`,
+        `Acceso denegado. Se requiere uno de los siguientes roles: ${rolesRequeridos.join(', ')}`,
       );
     }
 

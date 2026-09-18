@@ -15,6 +15,7 @@ import { InscripcionesModule } from './inscripciones/inscripciones.module';
 import { AsistenciasModule } from './asistencias/asistencias.module';
 import { NotasModule } from './notas/notas.module';
 import { ReportesModule } from './reportes/reportes.module';
+import { MigrationModule } from './migration/migration.module';
 
 @Module({
   imports: [AuthModule,
@@ -52,6 +53,7 @@ import { ReportesModule } from './reportes/reportes.module';
     AsistenciasModule,
     NotasModule,
     ReportesModule,
+    MigrationModule
   ],
   controllers: [],
   providers: [],

@@ -98,7 +98,7 @@ export class CursosService {
         'horarios',
         'horarios.aula',
         'cursoPrerequisito',
-        'estado'
+        
       ],
     });
     if (!curso) throw new NotFoundException('Curso no encontrado');

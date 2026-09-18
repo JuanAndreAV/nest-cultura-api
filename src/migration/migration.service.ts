@@ -95,146 +95,151 @@ export class MigrationService {
   }
 
  private async procesarEstudiante(
-    est: EstudianteQ10,
-    resultados: ResultadoMigracion,
-  ): Promise<void> {
-    try {
-      const emailReal  = this.limpiarEmail(est.Email);
-      const esFicticio = !emailReal;
-      const email      = emailReal ?? this.generarEmailFicticio(est);
+  est: EstudianteQ10,
+  resultados: ResultadoMigracion,
+): Promise<void> {
+  try {
+    const emailReal  = this.limpiarEmail(est.Email);
+    const esFicticio = !emailReal;
+    const email      = emailReal ?? this.generarEmailFicticio(est);
 
-      // Buscar si ya existe por email o documento
-      const usuarioExistente = await this.userRepository.findOne({
-        where: [
-          { email },
-          ...(est.Numero_identificacion ? [{ documento: est.Numero_identificacion }] : []),
-        ],
+    // Mapeo de preguntas personalizadas para campos comunes (zona, enfoque)
+    const preguntas = this.mapearPreguntas(est.Preguntas_personalizadas);
+
+    // Buscar si ya existe por email o documento
+    const usuarioExistente = await this.userRepository.findOne({
+      where: [
+        { email },
+        ...(est.Numero_identificacion ? [{ documento: est.Numero_identificacion }] : []),
+      ],
+    });
+
+    let userId: string;
+
+    if (usuarioExistente) {
+      // — ACTUALIZAR —
+      userId = usuarioExistente.id;
+
+      // Preservar roles existentes y asegurar que incluya 'estudiante'
+      const rolesPrevios = usuarioExistente.roles || [];
+      const rolesActualizados = Array.from(
+        new Set([...rolesPrevios, 'estudiante']),
+      );
+
+      await this.userRepository.update(userId, {
+        nombre:                 this.capitalizar(est.Primer_nombre),
+        segundoNombre:          this.capitalizar(est.Segundo_nombre) || null,
+        apellido:               this.capitalizar(est.Primer_apellido),
+        segundoApellido:        this.capitalizar(est.Segundo_apellido) || null,
+        documento:              est.Numero_identificacion || null,
+        tipoIdentificacion:     est.Abreviatura_tipo_identificacion || null,
+        fechaNacimiento:        est.Fecha_nacimiento ? new Date(est.Fecha_nacimiento) : null,
+        telefono:               est.Celular || est.Telefono || null,
+        genero:                 est.Genero || null,
+        direccion:              est.Direccion || null,
+        barrio:                 est.Nombre_barrio || null,
+        municipio:              est.Nombre_municipio_residencia || null,
+        departamento:           est.Nombre_departamento_residencia || null,
+        pais:                   est.Nombre_pais_residencia || 'Colombia',
+        municipioNacimiento:    est.Nombre_municipio_nacimiento || null,
+        departamentoNacimiento: est.Nombre_departamento_nacimiento || null,
+        paisNacimiento:         est.Nombre_pais_nacimiento || null,
+        zonaResidencia:         preguntas.zona_residencia || null,
+        enfoquePoblacional:     preguntas.enfoque_poblacional || null,
+        roles:                  rolesActualizados,
+        ...(usuarioExistente.emailFicticio && emailReal
+          ? { email: emailReal, emailFicticio: false }
+          : {}),
       });
 
-      let userId: string;
+      resultados.actualizados++;
+      this.logger.verbose(`↺ Actualizado: ${email}`);
 
-      if (usuarioExistente) {
-        // — ACTUALIZAR —
-        userId = usuarioExistente.id;
-
-        await this.userRepository.update(userId, {
-          nombre:          this.capitalizar(est.Primer_nombre),
-          apellido:        this.capitalizar(
-                             `${est.Primer_apellido} ${est.Segundo_apellido}`.trim(),
-                           ),
-          documento:       est.Numero_identificacion || null,
-          fechaNacimiento: est.Fecha_nacimiento ? new Date(est.Fecha_nacimiento) : null,
-          telefono:        est.Celular || est.Telefono || null,
-          ...(usuarioExistente.emailFicticio && emailReal
-            ? { email: emailReal, emailFicticio: false }
-            : {}),
+    } else {
+      // — CREAR —
+      // 1. Crear en Supabase Auth
+      const { data: authData, error: authError } =
+        await this.supabase.auth.admin.createUser({
+          email,
+          password: est.Numero_identificacion || 'CasaCultura2026*',
+          email_confirm: true,
+          app_metadata: {
+            provider: 'email',
+            providers: ['email'],
+          },
+          user_metadata: {
+            roles:  ['estudiante'],
+            nombre: this.capitalizar(est.Primer_nombre),
+          },
         });
 
-        resultados.actualizados++;
-        this.logger.verbose(`↺ Actualizado: ${email}`);
-
-      } else {
-        // — CREAR —
-        // 1. Crear en Supabase Auth
-        const { data: authData, error: authError } =
-          await this.supabase.auth.admin.createUser({
-            email,
-            password: est.Numero_identificacion || 'CasaCultura2026*',
-            email_confirm: true,
-            app_metadata: {
-              provider: 'email',
-              providers: ['email']
-}           ,
-            user_metadata: {
-              role:   'estudiante',
-              nombre: this.capitalizar(est.Primer_nombre),
-            },
-          });
-
-        if (authError) {
-          if (authError.message.includes('already been registered')) {
-            this.logger.warn(`Desincronizado en Auth: ${email}`);
-            resultados.actualizados++;
-            return;
-          }
-          throw new Error(`Auth: ${authError.message}`);
+      if (authError) {
+        if (authError.message.includes('already been registered')) {
+          this.logger.warn(`Desincronizado en Auth: ${email}`);
+          resultados.actualizados++;
+          return;
         }
-
-        userId = authData.user.id;
-
-        // 2. INSERTAR DIRECTAMENTE en public.users (Ya que no hay trigger que lo haga)
-        const nuevoUsuario = this.userRepository.create({
-          id:              userId, // Enlazamos el UUID exacto que generó Supabase Auth
-          email:           email,
-          nombre:          this.capitalizar(est.Primer_nombre),
-          apellido:        this.capitalizar(
-                             `${est.Primer_apellido} ${est.Segundo_apellido}`.trim(),
-                           ),
-          documento:       est.Numero_identificacion || null,
-          fechaNacimiento: est.Fecha_nacimiento ? new Date(est.Fecha_nacimiento) : null,
-          telefono:        est.Celular || est.Telefono || null,
-          emailFicticio:   esFicticio,
-          activo:          true,
-          role:            'estudiante', // Si manejas la columna role directamente en tu entidad User
-        });
-
-        // Guardamos el registro físico en la tabla pública de PostgreSQL
-        await this.userRepository.save(nuevoUsuario);
-       
-        resultados.creados++;
-        this.logger.verbose(`✓ Creado de forma directa: ${email}${esFicticio ? ' (ficticio)' : ''}`);
+        throw new Error(`Auth: ${authError.message}`);
       }
 
-      // Perfil extendido — upsert siempre
-      const preguntas = this.mapearPreguntas(est.Preguntas_personalizadas);
+      userId = authData.user.id;
 
-      await this.dataSource.query(
-        `INSERT INTO perfiles_estudiante (
-          usuario_id, tipo_identificacion, codigo_q10,
-          segundo_nombre, segundo_apellido, genero,
-          direccion, barrio, municipio, departamento, pais,
-          municipio_nacimiento, departamento_nacimiento, pais_nacimiento,
-          zona_residencia, enfoque_poblacional,
-          migrado_de_q10, fecha_migracion
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,NOW())
-        ON CONFLICT (usuario_id) DO UPDATE SET
-          direccion           = EXCLUDED.direccion,
-          barrio              = EXCLUDED.barrio,
-          municipio           = EXCLUDED.municipio,
-          departamento        = EXCLUDED.departamento,
-          zona_residencia     = EXCLUDED.zona_residencia,
-          enfoque_poblacional = EXCLUDED.enfoque_poblacional,
-          tipo_identificacion = EXCLUDED.tipo_identificacion,
-          genero              = EXCLUDED.genero,
-          updated_at          = NOW()`,
-        [
-          userId,
-          est.Abreviatura_tipo_identificacion || null,
-          est.Codigo_estudiante,
-          this.capitalizar(est.Segundo_nombre) || null,
-          this.capitalizar(est.Segundo_apellido) || null,
-          est.Genero || null,
-          est.Direccion || null,
-          est.Nombre_barrio || null,
-          est.Nombre_municipio_residencia || null,
-          est.Nombre_departamento_residencia || null,
-          est.Nombre_pais_residencia || 'Colombia',
-          est.Nombre_municipio_nacimiento || null,
-          est.Nombre_departamento_nacimiento || null,
-          est.Nombre_pais_nacimiento || null,
-          preguntas.zona_residencia,
-          preguntas.enfoque_poblacional,
-        ],
-      );
+      // 2. INSERTAR DIRECTAMENTE en public.users
+      const nuevoUsuario = this.userRepository.create({
+        id:                     userId,
+        email:                  email,
+        nombre:                 this.capitalizar(est.Primer_nombre),
+        segundoNombre:          this.capitalizar(est.Segundo_nombre) || null,
+        apellido:               this.capitalizar(est.Primer_apellido),
+        segundoApellido:        this.capitalizar(est.Segundo_apellido) || null,
+        documento:              est.Numero_identificacion || null,
+        tipoIdentificacion:     est.Abreviatura_tipo_identificacion || null,
+        fechaNacimiento:        est.Fecha_nacimiento ? new Date(est.Fecha_nacimiento) : null,
+        telefono:               est.Celular || est.Telefono || null,
+        genero:                 est.Genero || null,
+        direccion:              est.Direccion || null,
+        barrio:                 est.Nombre_barrio || null,
+        municipio:              est.Nombre_municipio_residencia || null,
+        departamento:           est.Nombre_departamento_residencia || null,
+        pais:                   est.Nombre_pais_residencia || 'Colombia',
+        municipioNacimiento:    est.Nombre_municipio_nacimiento || null,
+        departamentoNacimiento: est.Nombre_departamento_nacimiento || null,
+        paisNacimiento:         est.Nombre_pais_nacimiento || null,
+        zonaResidencia:         preguntas.zona_residencia || null,
+        enfoquePoblacional:     preguntas.enfoque_poblacional || null,
+        emailFicticio:          esFicticio,
+        activo:                 true,
+        roles:                  ['estudiante'],
+      });
 
-    } catch (error) {
-      resultados.errores++;
-      resultados.detalle_errores.push(
-        `[${est.Codigo_estudiante}] ${est.Primer_nombre} ${est.Primer_apellido}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      this.logger.error(`✗ [${est.Codigo_estudiante}]: ${error instanceof Error ? error.message : String(error)}`);
+      await this.userRepository.save(nuevoUsuario);
+     
+      resultados.creados++;
+      this.logger.verbose(`✓ Creado de forma directa: ${email}${esFicticio ? ' (ficticio)' : ''}`);
     }
+
+    // 3. Perfil extendido — solo metadatos específicos de estudiante
+    await this.dataSource.query(
+      `INSERT INTO perfiles_estudiante (
+        usuario_id, codigo_q10, migrado_de_q10, fecha_migracion, updated_at
+      ) VALUES ($1, $2, true, NOW(), NOW())
+      ON CONFLICT (usuario_id) DO UPDATE SET
+        codigo_q10 = EXCLUDED.codigo_q10,
+        updated_at = NOW()`,
+      [
+        userId,
+        est.Codigo_estudiante,
+      ],
+    );
+
+  } catch (error) {
+    resultados.errores++;
+    resultados.detalle_errores.push(
+      `[${est.Codigo_estudiante}] ${est.Primer_nombre} ${est.Primer_apellido}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    this.logger.error(`✗ [${est.Codigo_estudiante}]: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
   async fetchTodosLosEstudiantes(): Promise<EstudianteQ10[]> {
     const todos: EstudianteQ10[] = [];
     const LIMIT = 2000;

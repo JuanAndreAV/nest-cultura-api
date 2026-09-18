@@ -8,9 +8,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, IsNull } from 'typeorm';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { User } from '../auth/entities/user.entity';
+import { User, UserRole } from '../auth/entities/user.entity';
 import { CompletarPerfilDto } from './dto/completar-perfil.dto';
 import { FiltroUsuariosDto } from './dto/filtro-usuarios.dto';
+import { CompletarPerfilDocenteDto } from './dto/completa-perfil-docente.dto';
+import { ActualizarRolesDto } from './dto/actualizar-roles.dto';
 
 // IDs protegidos — nunca se tocan
 const IDS_PROTEGIDOS = new Set([
@@ -82,62 +84,84 @@ export class UsuariosService {
   // COMPLETAR PERFIL
   // Actualiza datos faltantes antes de formalizar inscripción
   // ----------------------------------------------------------------
-  async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
-    const usuario = await this.userRepository.findOne({
-      where: { id: usuarioId },
-    });
-
+ // usuarios.service.ts — reemplaza el método completarPerfil existente
+async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
+    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
     if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
-    // Actualizar public.users
+    // 1. Actualizar datos comunes en la entidad User
     await this.userRepository.update(usuarioId, {
-      ...(dto.nombre          && { nombre: dto.nombre }),
-      ...(dto.apellido        && { apellido: dto.apellido }),
-      ...(dto.telefono        && { telefono: dto.telefono }),
+      ...(dto.nombre && { nombre: dto.nombre }),
+      ...(dto.apellido && { apellido: dto.apellido }),
+      ...(dto.telefono && { telefono: dto.telefono }),
       ...(dto.fechaNacimiento && { fechaNacimiento: new Date(dto.fechaNacimiento) }),
+      ...(dto.tipoIdentificacion && { tipoIdentificacion: dto.tipoIdentificacion }),
+      ...(dto.segundoNombre && { segundoNombre: dto.segundoNombre }),
+      ...(dto.segundoApellido && { segundoApellido: dto.segundoApellido }),
+      ...(dto.genero && { genero: dto.genero }),
+      ...(dto.direccion && { direccion: dto.direccion }),
+      ...(dto.barrio && { barrio: dto.barrio }),
+      ...(dto.municipio && { municipio: dto.municipio }),
+      ...(dto.departamento && { departamento: dto.departamento }),
+      ...(dto.pais && { pais: dto.pais }),
+      ...(dto.municipioNacimiento && { municipioNacimiento: dto.municipioNacimiento }),
+      ...(dto.departamentoNacimiento && { departamentoNacimiento: dto.departamentoNacimiento }),
+      ...(dto.paisNacimiento && { paisNacimiento: dto.paisNacimiento }),
+      ...(dto.zonaResidencia && { zonaResidencia: dto.zonaResidencia }),
+      ...(dto.enfoquePoblacional && { enfoquePoblacional: dto.enfoquePoblacional }),
+      ...(dto.tieneDiscapacidad !== undefined && { tieneDiscapacidad: dto.tieneDiscapacidad }),
+      ...(dto.tipoDiscapacidad && { tipoDiscapacidad: dto.tipoDiscapacidad }),
+      ...(dto.estrato !== undefined && { estrato: dto.estrato }),
+      ...(dto.eps && { eps: dto.eps }),
     });
 
-    // Actualizar perfiles_estudiante
+    // 2. Si vienen datos de acudiente, actualizamos perfiles_estudiante
+    if (dto.acudienteNombre || dto.acudienteTelefono || dto.acudienteParentesco) {
+      await this.dataSource.query(
+        `INSERT INTO perfiles_estudiante (
+          usuario_id, acudiente_nombre, acudiente_telefono, acudiente_parentesco, updated_at
+        ) VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (usuario_id) DO UPDATE SET
+          acudiente_nombre     = COALESCE(EXCLUDED.acudiente_nombre, perfiles_estudiante.acudiente_nombre),
+          acudiente_telefono   = COALESCE(EXCLUDED.acudiente_telefono, perfiles_estudiante.acudiente_telefono),
+          acudiente_parentesco = COALESCE(EXCLUDED.acudiente_parentesco, perfiles_estudiante.acudiente_parentesco),
+          updated_at           = NOW()`,
+        [usuarioId, dto.acudienteNombre ?? null, dto.acudienteTelefono ?? null, dto.acudienteParentesco ?? null],
+      );
+    }
+
+    return { mensaje: 'Perfil general actualizado correctamente' };
+  };
+
+  async completarPerfilDocente(usuarioId: string, dto: CompletarPerfilDocenteDto) {
+    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+    if (!usuario) throw new NotFoundException('Usuario no encontrado');
+
     await this.dataSource.query(
-      `INSERT INTO perfiles_estudiante (
-        usuario_id, direccion, barrio, municipio, departamento,
-        genero, tiene_discapacidad, tipo_discapacidad, estrato, eps,
-        acudiente_nombre, acudiente_telefono, acudiente_parentesco,
-        updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+      `INSERT INTO perfiles_docente (
+        usuario_id, especialidad, tipo_vinculacion, tarifa_hora, hoja_vida_url, fecha_vinculacion, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
       ON CONFLICT (usuario_id) DO UPDATE SET
-        direccion            = COALESCE(EXCLUDED.direccion, perfiles_estudiante.direccion),
-        barrio               = COALESCE(EXCLUDED.barrio, perfiles_estudiante.barrio),
-        municipio            = COALESCE(EXCLUDED.municipio, perfiles_estudiante.municipio),
-        departamento         = COALESCE(EXCLUDED.departamento, perfiles_estudiante.departamento),
-        genero               = COALESCE(EXCLUDED.genero, perfiles_estudiante.genero),
-        tiene_discapacidad   = COALESCE(EXCLUDED.tiene_discapacidad, perfiles_estudiante.tiene_discapacidad),
-        tipo_discapacidad    = COALESCE(EXCLUDED.tipo_discapacidad, perfiles_estudiante.tipo_discapacidad),
-        estrato              = COALESCE(EXCLUDED.estrato, perfiles_estudiante.estrato),
-        eps                  = COALESCE(EXCLUDED.eps, perfiles_estudiante.eps),
-        acudiente_nombre     = COALESCE(EXCLUDED.acudiente_nombre, perfiles_estudiante.acudiente_nombre),
-        acudiente_telefono   = COALESCE(EXCLUDED.acudiente_telefono, perfiles_estudiante.acudiente_telefono),
-        acudiente_parentesco = COALESCE(EXCLUDED.acudiente_parentesco, perfiles_estudiante.acudiente_parentesco),
-        updated_at           = NOW()`,
+        especialidad      = COALESCE(EXCLUDED.especialidad, perfiles_docente.especialidad),
+        tipo_vinculacion  = COALESCE(EXCLUDED.tipo_vinculacion, perfiles_docente.tipo_vinculacion),
+        tarifa_hora       = COALESCE(EXCLUDED.tarifa_hora, perfiles_docente.tarifa_hora),
+        hoja_vida_url     = COALESCE(EXCLUDED.hoja_vida_url, perfiles_docente.hoja_vida_url),
+        fecha_vinculacion = COALESCE(EXCLUDED.fecha_vinculacion, perfiles_docente.fecha_vinculacion),
+        updated_at        = NOW()`,
       [
         usuarioId,
-        dto.direccion           ?? null,
-        dto.barrio              ?? null,
-        dto.municipio           ?? null,
-        dto.departamento        ?? null,
-        dto.genero              ?? null,
-        dto.tieneDiscapacidad   ?? null,
-        dto.tipoDiscapacidad    ?? null,
-        dto.estrato             ?? null,
-        dto.eps                 ?? null,
-        dto.acudienteNombre     ?? null,
-        dto.acudienteTelefono   ?? null,
-        dto.acudienteParentesco ?? null,
+        dto.especialidad ?? null,
+        dto.tipoVinculacion ?? null,
+        dto.tarifaHora ?? null,
+        dto.hojaVidaUrl ?? null,
+        dto.fechaVinculacion ?? null,
       ],
     );
 
-    return { mensaje: 'Perfil actualizado correctamente' };
+    return { mensaje: 'Perfil docente actualizado correctamente' };
   }
+
+
 
   // ----------------------------------------------------------------
   // LISTAR USUARIOS CON FILTROS
@@ -279,4 +303,25 @@ export class UsuariosService {
     if (!usuario.documento)       faltantes.push('documento');
     return faltantes;
   }
+
+  //Actualizar roles
+  async actualizarRoles(usuarioId: string, dto: ActualizarRolesDto) {
+  const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+  if (!usuario) throw new NotFoundException('Usuario no encontrado');
+
+  // Asegurar elementos únicos en el arreglo
+  const rolesUnicos = Array.from(new Set(dto.roles));
+
+  await this.userRepository.update(usuarioId, {
+    roles: rolesUnicos,
+  });
+
+  return { mensaje: 'Roles actualizados correctamente', roles: rolesUnicos };
+}
+async obtenerDocentes() {
+  return this.userRepository
+    .createQueryBuilder('user')
+    .where(':rol = ANY(user.roles)', { rol: UserRole.DOCENTE })
+    .getMany();
+}
 }

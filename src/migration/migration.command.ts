@@ -2,7 +2,7 @@ import { Command, CommandRunner } from 'nest-commander';
 import { Injectable } from '@nestjs/common';
 import { MigrationService } from './migration.service';
 
-@Injectable()
+//@Injectable()
 @Command({
   name: 'migrar:q10',
   description: 'Migra y sincroniza estudiantes desde Q10 a Supabase',

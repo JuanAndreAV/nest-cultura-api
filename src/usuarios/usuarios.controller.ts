@@ -1,6 +1,7 @@
 import {
   Controller, Get, Put, Delete,
   Param, Body, Query, UseGuards, Patch,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
 import { CompletarPerfilDto } from './dto/completar-perfil.dto';
@@ -9,6 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CompletarPerfilDocenteDto } from './dto/completa-perfil-docente.dto';
 
 @Controller('usuarios')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,7 +28,7 @@ export class UsuariosController {
   // Completar perfil — el propio usuario o admin
   @Put(':id/completar-perfil')
   completarPerfil(
-    @Param('id') id: string,
+    @Param('id',ParseUUIDPipe) id: string,
     @Body() dto: CompletarPerfilDto,
     @CurrentUser() user: any,
   ) {
@@ -35,6 +37,14 @@ export class UsuariosController {
       throw new Error('No tienes permiso para editar este perfil.');
     }
     return this.usuariosService.completarPerfil(id, dto);
+  }
+
+  @Put(':id/completar-perfil-docente')
+  async completarPerfilDocente(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CompletarPerfilDocenteDto,
+  ) {
+    return this.usuariosService.completarPerfilDocente(id, dto);
   }
 
   // Listar usuarios con filtros — solo admin
