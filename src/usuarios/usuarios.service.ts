@@ -4,17 +4,20 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, IsNull } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
 import { User, UserRole } from '../auth/entities/user.entity';
+import { CrearUsuarioDto } from './dto/create-usuario.dto';
 import { CompletarPerfilDto } from './dto/completar-perfil.dto';
-import { FiltroUsuariosDto } from './dto/filtro-usuarios.dto';
 import { CompletarPerfilDocenteDto } from './dto/completa-perfil-docente.dto';
+import { FiltroUsuariosDto } from './dto/filtro-usuarios.dto';
 import { ActualizarRolesDto } from './dto/actualizar-roles.dto';
 
-// IDs protegidos — nunca se tocan
+// IDs protegidos — nunca se alteran ni eliminan de la BD
 const IDS_PROTEGIDOS = new Set([
   '45559c1e-2c7d-48d1-9fb6-a78eef91194b',
   '32eefbd0-4b40-4cf2-8fab-df1b7bd9efa2',
@@ -38,10 +41,83 @@ export class UsuariosService {
     );
   }
 
-  // ----------------------------------------------------------------
-  // VERIFICAR POR DOCUMENTO
-  // Busca si el usuario existe antes de inscribirse
-  // ----------------------------------------------------------------
+  // ================================================================
+  // 1. CREACIÓN Y VERIFICACIÓN BASE DE USUARIOS
+  // ================================================================
+
+  /**
+   * Crear un nuevo usuario en Supabase Auth y sincronizar en public.users (Admin)
+   */
+  async crear(dto: CrearUsuarioDto) {
+    // Definir roles iniciales tolerando rolesIniciales o role
+    const rolesIniciales = dto.role || dto.role || [UserRole.ESTUDIANTE];
+
+    // Si el email llega vacío, generar un correo ficticio único basado en documento
+    const emailEsFicticio = !dto.email || !dto.email.trim();
+    const emailFinal = emailEsFicticio
+      ? `${dto.documento}@sistema.local`
+      : dto.email!.trim();
+
+    // Validar duplicados en la base de datos local
+    const existe = await this.userRepository.findOne({
+      where: [{ documento: dto.documento }, { email: emailFinal }],
+    });
+
+    if (existe) {
+      throw new ConflictException(
+        'Ya existe un usuario registrado con este documento o correo electrónico.',
+      );
+    }
+
+    // 1. Crear en Supabase Auth Admin
+    const { data: authUser, error: authError } =
+      await this.supabase.auth.admin.createUser({
+        email: emailFinal,
+        password: dto.password || dto.documento, // Si no envía contraseña, asigna el documento
+        email_confirm: true,
+        user_metadata: {
+          nombre: dto.nombre,
+          apellido: dto.apellido,
+          documento: dto.documento,
+        },
+        app_metadata: {
+          roles: rolesIniciales,
+        },
+      });
+
+    if (authError || !authUser.user) {
+      throw new BadRequestException(
+        `Error al registrar en Supabase Auth: ${authError?.message}`,
+      );
+    }
+
+    // 2. Insertar en public.users reutilizando el UUID generado por Supabase Auth
+    const nuevoUsuario = this.userRepository.create({
+      id: authUser.user.id,
+      nombre: dto.nombre,
+      segundoNombre: dto.segundoNombre,
+      apellido: dto.apellido,
+      segundoApellido: dto.segundoApellido,
+      email: emailFinal,
+      emailFicticio: emailEsFicticio,
+      documento: dto.documento,
+      tipoIdentificacion: dto.tipoIdentificacion,
+      telefono: dto.telefono,
+      roles: rolesIniciales as UserRole[],
+      activo: true,
+    });
+
+    await this.userRepository.save(nuevoUsuario);
+
+    return {
+      mensaje: 'Usuario creado exitosamente',
+      usuario: nuevoUsuario,
+    };
+  }
+
+  /**
+   * Verificar existencia de usuario por documento antes de matricular o registrar.
+   */
   async verificarDocumento(documento: string) {
     const usuario = await this.userRepository.findOne({
       where: { documento },
@@ -54,68 +130,47 @@ export class UsuariosService {
       };
     }
 
-    // Verificar campos faltantes para saber qué debe completar
     const camposFaltantes = this.detectarCamposFaltantes(usuario);
 
-    // Traer perfil extendido
     const [perfilExtendido] = await this.dataSource.query(
       `SELECT * FROM perfiles_estudiante WHERE usuario_id = $1`,
       [usuario.id],
     );
 
     return {
-      existe:          true,
-      id:              usuario.id,
-      nombre:          usuario.nombre,
-      apellido:        usuario.apellido,
-      email:           usuario.emailFicticio ? null : usuario.email,
-      emailFicticio:   usuario.emailFicticio,
-      documento:       usuario.documento,
+      existe: true,
+      id: usuario.id,
+      nombre: usuario.nombre,
+      apellido: usuario.apellido,
+      email: usuario.emailFicticio ? null : usuario.email,
+      emailFicticio: usuario.emailFicticio,
+      documento: usuario.documento,
+      tipoIdentificacion: usuario.tipoIdentificacion,
       fechaNacimiento: usuario.fechaNacimiento,
-      telefono:        usuario.telefono,
-      activo:          usuario.activo,
-      perfil:          perfilExtendido ?? null,
+      telefono: usuario.telefono,
+      roles: usuario.roles,
+      activo: usuario.activo,
+      perfil: perfilExtendido ?? null,
       camposFaltantes,
-      perfilCompleto:  camposFaltantes.length === 0,
+      perfilCompleto: camposFaltantes.length === 0,
     };
   }
 
-  // ----------------------------------------------------------------
-  // COMPLETAR PERFIL
-  // Actualiza datos faltantes antes de formalizar inscripción
-  // ----------------------------------------------------------------
- // usuarios.service.ts — reemplaza el método completarPerfil existente
-async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
+  // ================================================================
+  // 2. ACTUALIZACIÓN DE PERFILES (GENERAL, ESTUDIANTE Y DOCENTE)
+  // ================================================================
+
+  /**
+   * Actualiza datos generales del usuario y, opcionalmente, la información de acudiente.
+   */
+  async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
     const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
     if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
-    // 1. Actualizar datos comunes en la entidad User
-    await this.userRepository.update(usuarioId, {
-      ...(dto.nombre && { nombre: dto.nombre }),
-      ...(dto.apellido && { apellido: dto.apellido }),
-      ...(dto.telefono && { telefono: dto.telefono }),
-      ...(dto.fechaNacimiento && { fechaNacimiento: new Date(dto.fechaNacimiento) }),
-      ...(dto.tipoIdentificacion && { tipoIdentificacion: dto.tipoIdentificacion }),
-      ...(dto.segundoNombre && { segundoNombre: dto.segundoNombre }),
-      ...(dto.segundoApellido && { segundoApellido: dto.segundoApellido }),
-      ...(dto.genero && { genero: dto.genero }),
-      ...(dto.direccion && { direccion: dto.direccion }),
-      ...(dto.barrio && { barrio: dto.barrio }),
-      ...(dto.municipio && { municipio: dto.municipio }),
-      ...(dto.departamento && { departamento: dto.departamento }),
-      ...(dto.pais && { pais: dto.pais }),
-      ...(dto.municipioNacimiento && { municipioNacimiento: dto.municipioNacimiento }),
-      ...(dto.departamentoNacimiento && { departamentoNacimiento: dto.departamentoNacimiento }),
-      ...(dto.paisNacimiento && { paisNacimiento: dto.paisNacimiento }),
-      ...(dto.zonaResidencia && { zonaResidencia: dto.zonaResidencia }),
-      ...(dto.enfoquePoblacional && { enfoquePoblacional: dto.enfoquePoblacional }),
-      ...(dto.tieneDiscapacidad !== undefined && { tieneDiscapacidad: dto.tieneDiscapacidad }),
-      ...(dto.tipoDiscapacidad && { tipoDiscapacidad: dto.tipoDiscapacidad }),
-      ...(dto.estrato !== undefined && { estrato: dto.estrato }),
-      ...(dto.eps && { eps: dto.eps }),
-    });
+    // 1. Actualizar entidad principal User
+    await this.actualizarDatosGeneralesUser(usuarioId, dto);
 
-    // 2. Si vienen datos de acudiente, actualizamos perfiles_estudiante
+    // 2. Si vienen datos de acudiente, upsert en perfiles_estudiante
     if (dto.acudienteNombre || dto.acudienteTelefono || dto.acudienteParentesco) {
       await this.dataSource.query(
         `INSERT INTO perfiles_estudiante (
@@ -126,14 +181,25 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
           acudiente_telefono   = COALESCE(EXCLUDED.acudiente_telefono, perfiles_estudiante.acudiente_telefono),
           acudiente_parentesco = COALESCE(EXCLUDED.acudiente_parentesco, perfiles_estudiante.acudiente_parentesco),
           updated_at           = NOW()`,
-        [usuarioId, dto.acudienteNombre ?? null, dto.acudienteTelefono ?? null, dto.acudienteParentesco ?? null],
+        [
+          usuarioId,
+          dto.acudienteNombre ?? null,
+          dto.acudienteTelefono ?? null,
+          dto.acudienteParentesco ?? null,
+        ],
       );
     }
 
     return { mensaje: 'Perfil general actualizado correctamente' };
-  };
+  }
 
-  async completarPerfilDocente(usuarioId: string, dto: CompletarPerfilDocenteDto) {
+  /**
+   * Guarda o actualiza los datos del perfil docente.
+   */
+  async completarPerfilDocente(
+    usuarioId: string,
+    dto: CompletarPerfilDocenteDto,
+  ) {
     const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
     if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
@@ -161,84 +227,122 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
     return { mensaje: 'Perfil docente actualizado correctamente' };
   }
 
+  // ================================================================
+  // 3. REGISTROS / INSCRIPCIONES DESDE MÓDULOS ESPECÍFICOS DEL FRONT
+  // ================================================================
 
+  /**
+   * Inscripción de usuario como estudiante (asigna rol 'estudiante' y actualiza perfil).
+   */
+  async inscribirComoEstudiante(usuarioId: string, dto: CompletarPerfilDto) {
+    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+    if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
-  // ----------------------------------------------------------------
-  // LISTAR USUARIOS CON FILTROS
-  // Para el panel de admin
-  // ----------------------------------------------------------------
+    await this.asegurarRol(usuario, UserRole.ESTUDIANTE);
+    return await this.completarPerfil(usuarioId, dto);
+  }
+
+  /**
+   * Inscripción de usuario como docente (asigna rol 'docente' y actualiza perfil docente).
+   */
+  async inscribirComoDocente(
+    usuarioId: string,
+    dto: CompletarPerfilDocenteDto,
+  ) {
+    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+    if (!usuario) throw new NotFoundException('Usuario no encontrado');
+
+    await this.asegurarRol(usuario, UserRole.DOCENTE);
+    return await this.completarPerfilDocente(usuarioId, dto);
+  }
+
+  // ================================================================
+  // 4. MÓDULO ADMINISTRATIVO, FILTROS Y ROLES
+  // ================================================================
+
+  /**
+   * Asignación manual de roles desde módulo administrativo.
+   */
+  async actualizarRoles(usuarioId: string, dto: ActualizarRolesDto) {
+    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+    if (!usuario) throw new NotFoundException('Usuario no encontrado');
+
+    const rolesUnicos = Array.from(new Set(dto.roles));
+
+    // 1. Guardar en Postgres
+    await this.userRepository.update(usuarioId, { roles: rolesUnicos as UserRole[] });
+
+    // 2. Sincronizar en Supabase Auth Admin
+    await this.supabase.auth.admin.updateUserById(usuarioId, {
+      app_metadata: { roles: rolesUnicos },
+    });
+
+    return { mensaje: 'Roles actualizados correctamente', roles: rolesUnicos };
+  }
+
+  /**
+   * Consulta paginada desde la vista `v_usuarios_completo`.
+   */
   async listar(filtros: FiltroUsuariosDto) {
-    const { data, error } = await this.supabase
+    const pagina = filtros.pagina ?? 1;
+    const porPagina = filtros.porPagina ?? 20;
+    const desde = (pagina - 1) * porPagina;
+    const hasta = desde + porPagina - 1;
+
+    let query = this.supabase
       .from('v_usuarios_completo')
-      .select('*');
+      .select('*', { count: 'exact' });
 
-    if (error) throw new BadRequestException(error.message);
-
-    let resultado = data;
-
-    // Filtros en memoria (para no complicar la query de la vista)
     if (filtros.nombre) {
-      const termino = filtros.nombre.toLowerCase();
-      resultado = resultado.filter(u =>
-        u.nombre_completo?.toLowerCase().includes(termino),
-      );
+      query = query.ilike('nombre_completo', `%${filtros.nombre}%`);
     }
 
     if (filtros.documento) {
-      resultado = resultado.filter(u =>
-        u.documento?.includes(filtros.documento!),
-      );
+      query = query.eq('documento', filtros.documento);
     }
 
     if (filtros.rol) {
-      resultado = resultado.filter(u =>
-        u.roles?.includes(filtros.rol),
-      );
+      query = query.contains('roles', [filtros.rol]);
     }
 
     if (filtros.activo !== undefined) {
-      resultado = resultado.filter(u => u.activo === filtros.activo);
+      query = query.eq('activo', filtros.activo);
     }
 
-    if (filtros.soloSinInscripcion) {
-      const sinInscripcion = await this.dataSource.query(
-        `SELECT u.id FROM public.users u
-         LEFT JOIN inscripciones i ON i.usuario_id = u.id AND i.estado = 'activa'
-         WHERE i.id IS NULL AND u.activo = true`,
-      );
-      const ids = new Set(sinInscripcion.map((r: any) => r.id));
-      resultado = resultado.filter(u => ids.has(u.id));
-    }
+    const { data, count, error } = await query.range(desde, hasta);
 
-    // Paginación
-    const pagina    = filtros.pagina ?? 1;
-    const porPagina = filtros.porPagina ?? 20;
-    const total     = resultado.length;
-    const paginado  = resultado.slice((pagina - 1) * porPagina, pagina * porPagina);
+    if (error) throw new BadRequestException(error.message);
 
     return {
-      total,
+      total: count ?? 0,
       pagina,
       porPagina,
-      totalPaginas: Math.ceil(total / porPagina),
-      datos: paginado,
+      totalPaginas: Math.ceil((count ?? 0) / porPagina),
+      datos: data,
     };
   }
 
-  // ----------------------------------------------------------------
-  // MARCAR INACTIVOS
-  // Usuarios migrados de Q10 sin ninguna inscripción activa
-  // Solo admin puede ejecutar esto
-  // ----------------------------------------------------------------
+  /**
+   * Obtener docentes activos para selectores en matrículas o asignación de clases.
+   */
+  async obtenerDocentes() {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .where(':rol = ANY(user.roles)', { rol: UserRole.DOCENTE })
+      .getMany();
+  }
+
+  /**
+   * Marcar usuarios inactivos si no tienen inscripciones vigentes.
+   */
   async marcarInactivos(): Promise<{ afectados: number; usuarios: any[] }> {
     const sinInscripcion = await this.dataSource.query(
       `SELECT u.id, u.email, u.nombre, u.apellido, u."createdAt"
        FROM public.users u
        LEFT JOIN inscripciones i ON i.usuario_id = u.id AND i.estado = 'activa'
-       LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id
        WHERE i.id IS NULL
          AND u.activo = true
-         AND ur.role = 'estudiante'
+         AND 'estudiante' = ANY(u.roles)
          AND u.id NOT IN (${[...IDS_PROTEGIDOS].map((_, i) => `$${i + 1}`).join(',')})`,
       [...IDS_PROTEGIDOS],
     );
@@ -250,8 +354,7 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
     const ids = sinInscripcion.map((u: any) => u.id);
 
     await this.dataSource.query(
-      `UPDATE public.users SET activo = false
-       WHERE id = ANY($1::uuid[])`,
+      `UPDATE public.users SET activo = false WHERE id = ANY($1::uuid[])`,
       [ids],
     );
 
@@ -259,17 +362,16 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
 
     return {
       afectados: ids.length,
-      usuarios:  sinInscripcion,
+      usuarios: sinInscripcion,
     };
   }
 
-  // ----------------------------------------------------------------
-  // ELIMINAR USUARIO (con autorización)
-  // Solo admin, nunca los protegidos
-  // ----------------------------------------------------------------
+  /**
+   * Eliminar usuario (Desactiva y remueve de Auth / DB).
+   */
   async eliminar(usuarioId: string): Promise<{ mensaje: string }> {
     if (IDS_PROTEGIDOS.has(usuarioId)) {
-      throw new ForbiddenException('Este usuario no puede ser eliminado.');
+      throw new ForbiddenException('Este usuario está protegido y no se puede eliminar.');
     }
 
     const usuario = await this.userRepository.findOne({
@@ -280,48 +382,86 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
 
     if (usuario.activo) {
       throw new BadRequestException(
-        'El usuario debe estar inactivo antes de eliminarlo. Usa marcar-inactivos primero.',
+        'El usuario debe estar inactivo antes de ser eliminado. Usa marcar-inactivos primero.',
       );
     }
 
-    // Eliminar de Supabase Auth (cascada elimina public.users por FK)
     const { error } = await this.supabase.auth.admin.deleteUser(usuarioId);
-    if (error) throw new BadRequestException('Error eliminando usuario: ' + error.message);
+    if (error) {
+      throw new BadRequestException('Error eliminando usuario en Supabase Auth: ' + error.message);
+    }
 
     return { mensaje: `Usuario ${usuario.email} eliminado correctamente.` };
   }
 
-  // ----------------------------------------------------------------
-  // HELPERS
-  // ----------------------------------------------------------------
-  private detectarCamposFaltantes(usuario: User): string[] {
-    const faltantes: string[] = [];
-    if (!usuario.nombre)          faltantes.push('nombre');
-    if (!usuario.apellido)        faltantes.push('apellido');
-    if (!usuario.telefono)        faltantes.push('telefono');
-    if (!usuario.fechaNacimiento) faltantes.push('fechaNacimiento');
-    if (!usuario.documento)       faltantes.push('documento');
-    return faltantes;
+  // ================================================================
+  // HELPER MÉTODOS PRIVADOS
+  // ================================================================
+
+  /**
+   * Agrega un nuevo rol al arreglo de roles sin duplicados y lo sincroniza en Supabase Auth.
+   */
+  private async asegurarRol(usuario: User, nuevoRol: string) {
+    const rolesActuales = (usuario.roles as string[]) || [];
+
+    if (!rolesActuales.includes(nuevoRol)) {
+      const rolesActualizados = [...rolesActuales, nuevoRol];
+
+      // 1. Guardar en Base de Datos PostgreSQL
+      await this.userRepository.update(usuario.id, {
+        roles: rolesActualizados as UserRole[],
+      });
+
+      // 2. Actualizar metadatos en Supabase Auth Admin
+      await this.supabase.auth.admin.updateUserById(usuario.id, {
+        app_metadata: { roles: rolesActualizados },
+      });
+    }
   }
 
-  //Actualizar roles
-  async actualizarRoles(usuarioId: string, dto: ActualizarRolesDto) {
-  const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
-  if (!usuario) throw new NotFoundException('Usuario no encontrado');
+  /**
+   * Mapeo y actualización dinámica de los campos personales en public.users.
+   */
+  private async actualizarDatosGeneralesUser(
+    usuarioId: string,
+    dto: CompletarPerfilDto,
+  ) {
+    await this.userRepository.update(usuarioId, {
+      ...(dto.nombre && { nombre: dto.nombre }),
+      ...(dto.apellido && { apellido: dto.apellido }),
+      ...(dto.telefono && { telefono: dto.telefono }),
+      ...(dto.fechaNacimiento && { fechaNacimiento: new Date(dto.fechaNacimiento) }),
+      ...(dto.tipoIdentificacion && { tipoIdentificacion: dto.tipoIdentificacion }),
+      ...(dto.segundoNombre && { segundoNombre: dto.segundoNombre }),
+      ...(dto.segundoApellido && { segundoApellido: dto.segundoApellido }),
+      ...(dto.genero && { genero: dto.genero }),
+      ...(dto.direccion && { direccion: dto.direccion }),
+      ...(dto.barrio && { barrio: dto.barrio }),
+      ...(dto.municipio && { municipio: dto.municipio }),
+      ...(dto.departamento && { departamento: dto.departamento }),
+      ...(dto.pais && { pais: dto.pais }),
+      ...(dto.municipioNacimiento && { municipioNacimiento: dto.municipioNacimiento }),
+      ...(dto.departamentoNacimiento && { departamentoNacimiento: dto.departamentoNacimiento }),
+      ...(dto.paisNacimiento && { paisNacimiento: dto.paisNacimiento }),
+      ...(dto.zonaResidencia && { zonaResidencia: dto.zonaResidencia }),
+      ...(dto.enfoquePoblacional && { enfoquePoblacional: dto.enfoquePoblacional }),
+      ...(dto.tieneDiscapacidad !== undefined && { tieneDiscapacidad: dto.tieneDiscapacidad }),
+      ...(dto.tipoDiscapacidad && { tipoDiscapacidad: dto.tipoDiscapacidad }),
+      ...(dto.estrato !== undefined && { estrato: dto.estrato }),
+      ...(dto.eps && { eps: dto.eps }),
+    });
+  }
 
-  // Asegurar elementos únicos en el arreglo
-  const rolesUnicos = Array.from(new Set(dto.roles));
-
-  await this.userRepository.update(usuarioId, {
-    roles: rolesUnicos,
-  });
-
-  return { mensaje: 'Roles actualizados correctamente', roles: rolesUnicos };
-}
-async obtenerDocentes() {
-  return this.userRepository
-    .createQueryBuilder('user')
-    .where(':rol = ANY(user.roles)', { rol: UserRole.DOCENTE })
-    .getMany();
-}
+  /**
+   * Evalúa qué atributos básicos faltan por completar.
+   */
+  private detectarCamposFaltantes(usuario: User): string[] {
+    const faltantes: string[] = [];
+    if (!usuario.nombre) faltantes.push('nombre');
+    if (!usuario.apellido) faltantes.push('apellido');
+    if (!usuario.telefono) faltantes.push('telefono');
+    if (!usuario.fechaNacimiento) faltantes.push('fechaNacimiento');
+    if (!usuario.documento) faltantes.push('documento');
+    return faltantes;
+  }
 }

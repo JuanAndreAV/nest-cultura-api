@@ -22,7 +22,7 @@ export class InscripcionesController {
 
   // Inscripción directa — solo admin
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  //@UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   inscribir(@Body() dto: CreateInscripcionDto) {
     return this.inscripcionesService.inscribir(dto);
@@ -74,7 +74,8 @@ export class InscripcionesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   listarPendientes(@CurrentUser() user: any) {
-    const docenteId = user.es_admin ? undefined : user.id;
+    const docenteId = user.roles.includes('docente') ? user.id : undefined;
+    //console.log('Listando inscripciones pendientes para docenteId:', user.roles, docenteId);
     return this.inscripcionesService.listarPendientes(docenteId);
   }
 }

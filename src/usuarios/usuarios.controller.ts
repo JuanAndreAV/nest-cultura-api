@@ -1,9 +1,10 @@
 import {
-  Controller, Get, Put, Delete,
+  Controller, Get, Post, Put, Delete,
   Param, Body, Query, UseGuards, Patch,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
+import { CrearUsuarioDto } from './dto/create-usuario.dto';
 import { CompletarPerfilDto } from './dto/completar-perfil.dto';
 import { FiltroUsuariosDto } from './dto/filtro-usuarios.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,6 +19,13 @@ export class UsuariosController {
 
   constructor(private readonly usuariosService: UsuariosService) {}
 
+  // Crear usuario — solo admin
+  @Post('crear')
+  @Roles('admin')
+  crear(@Body() dto: CrearUsuarioDto) {
+    return this.usuariosService.crear(dto);
+  }
+
   // Verificar por documento — admin y docente
   @Get('verificar/:documento')
   @Roles('admin', 'docente')
@@ -28,7 +36,7 @@ export class UsuariosController {
   // Completar perfil — el propio usuario o admin
   @Put(':id/completar-perfil')
   completarPerfil(
-    @Param('id',ParseUUIDPipe) id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CompletarPerfilDto,
     @CurrentUser() user: any,
   ) {
@@ -64,7 +72,7 @@ export class UsuariosController {
   // Eliminar usuario — solo admin
   @Delete(':id')
   @Roles('admin')
-  eliminar(@Param('id') id: string) {
+  eliminar(@Param('id', ParseUUIDPipe) id: string) {
     return this.usuariosService.eliminar(id);
   }
 }
