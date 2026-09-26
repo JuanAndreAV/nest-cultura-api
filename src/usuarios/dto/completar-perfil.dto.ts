@@ -1,31 +1,38 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsDateString } from 'class-validator';
+// completar-perfil.dto.ts
+import { IsString, IsOptional, IsDateString, IsBoolean, IsInt, Min, Max, IsArray } from 'class-validator';
 
 export class CompletarPerfilDto {
-  @IsOptional() @IsString() nombre?: string;
-  @IsOptional() @IsString() apellido?: string;
-  @IsOptional() @IsString() telefono?: string;
-  @IsOptional() @IsDateString() fechaNacimiento?: string;
-  @IsOptional() @IsString() tipoIdentificacion?: string;
-  @IsOptional() @IsString() segundoNombre?: string;
-  @IsOptional() @IsString() segundoApellido?: string;
-  @IsOptional() @IsString() genero?: string;
-  @IsOptional() @IsString() direccion?: string;
-  @IsOptional() @IsString() barrio?: string;
-  @IsOptional() @IsString() municipio?: string;
-  @IsOptional() @IsString() departamento?: string;
-  @IsOptional() @IsString() pais?: string;
-  @IsOptional() @IsString() municipioNacimiento?: string;
-  @IsOptional() @IsString() departamentoNacimiento?: string;
-  @IsOptional() @IsString() paisNacimiento?: string;
-  @IsOptional() @IsString() zonaResidencia?: string;
-  @IsOptional() @IsString() enfoquePoblacional?: string;
-  @IsOptional() @IsBoolean() tieneDiscapacidad?: boolean;
-  @IsOptional() @IsString() tipoDiscapacidad?: string;
-  @IsOptional() @IsNumber() estrato?: number;
-  @IsOptional() @IsString() eps?: string;
+  @IsString() @IsOptional() nombre?: string;
+  @IsString() @IsOptional() segundoNombre?: string;
+  @IsString() @IsOptional() apellido?: string;
+  @IsString() @IsOptional() segundoApellido?: string;
+  @IsString() @IsOptional() tipoIdentificacion?: string;
+  @IsString() @IsOptional() telefono?: string;
+  @IsString() @IsOptional() genero?: string;
+  @IsDateString() @IsOptional() fechaNacimiento?: string;
 
-  // Datos específicos de acudiente para estudiantes (opcional en este DTO)
-  @IsOptional() @IsString() acudienteNombre?: string;
-  @IsOptional() @IsString() acudienteTelefono?: string;
-  @IsOptional() @IsString() acudienteParentesco?: string;
+  @IsString() @IsOptional() direccion?: string;
+  @IsString() @IsOptional() barrio?: string;
+  @IsString() @IsOptional() municipio?: string;
+  @IsString() @IsOptional() departamento?: string;
+  @IsString() @IsOptional() pais?: string;
+
+  @IsString() @IsOptional() municipioNacimiento?: string;
+  @IsString() @IsOptional() departamentoNacimiento?: string;
+  @IsString() @IsOptional() paisNacimiento?: string;
+
+  @IsString() @IsOptional() zonaResidencia?: string;
+  @IsString() @IsOptional() enfoquePoblacional?: string;
+
+  @IsBoolean() @IsOptional() tieneDiscapacidad?: boolean;
+  @IsString() @IsOptional() tipoDiscapacidad?: string;
+
+  @IsInt() @Min(1) @Max(6) @IsOptional() estrato?: number;
+  @IsString() @IsOptional() eps?: string;
+
+  @IsString() @IsOptional() acudienteNombre?: string;
+  @IsString() @IsOptional() acudienteTelefono?: string;
+  @IsString() @IsOptional() acudienteParentesco?: string;
+
+  @IsArray() @IsString({ each: true }) @IsOptional() roles?: string[]; // nuevo
 }

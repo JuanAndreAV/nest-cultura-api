@@ -41,7 +41,7 @@ export class User {
     array: true,
     default: [UserRole.ESTUDIANTE],
   })
-  roles: UserRole[] | string[];
+  roles:  string[] //| UserRole[];
 
   // --- Campos comunes (personas) ---
   @Column({ type: 'varchar', nullable: true, name: 'tipo_identificacion' })

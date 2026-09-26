@@ -71,7 +71,7 @@ export class InscripcionesController {
 
   // Listar pendientes — admin ve todas, docente ve las de sus cursos
   @Get('pendientes')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   listarPendientes(@CurrentUser() user: any) {
     const docenteId = user.roles.includes('docente') ? user.id : undefined;

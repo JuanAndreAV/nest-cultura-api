@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Put, Delete,
   Param, Body, Query, UseGuards, Patch,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
 import { CrearUsuarioDto } from './dto/create-usuario.dto';
@@ -28,26 +29,35 @@ export class UsuariosController {
 
   // Verificar por documento — admin y docente
   @Get('verificar/:documento')
-  @Roles('admin', 'docente')
+  //@Roles('admin', 'docente')
   verificarDocumento(@Param('documento') documento: string) {
     return this.usuariosService.verificarDocumento(documento);
   }
 
-  // Completar perfil — el propio usuario o admin
+  
+ // Completar perfil — el propio usuario o admin
   @Put(':id/completar-perfil')
+  @Roles('admin')
   completarPerfil(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CompletarPerfilDto,
     @CurrentUser() user: any,
   ) {
-    // Solo admin puede completar el perfil de otro usuario
-    if (user.id !== id && !user.es_admin) {
-      throw new Error('No tienes permiso para editar este perfil.');
+    // 1. Determinar si el usuario logueado tiene el rol de administrador
+    const esAdmin = Array.isArray(user?.roles) 
+      ? user.roles.includes('admin') 
+      : Boolean(user?.es_admin || user?.esAdmin);
+
+    // 2. Permitir si es el mismo usuario O si es administrador
+    if (user.id !== id && !esAdmin) {
+      throw new ForbiddenException('No tienes permiso para editar este perfil.');
     }
+
     return this.usuariosService.completarPerfil(id, dto);
   }
 
   @Put(':id/completar-perfil-docente')
+  @Roles('admin')
   async completarPerfilDocente(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CompletarPerfilDocenteDto,

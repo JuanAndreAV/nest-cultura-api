@@ -35,9 +35,23 @@ export class UsuariosService {
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
   ) {
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    
+    // Forzamos al cliente de Supabase a usar de manera aislada la clave de Service Role
     this.supabase = createClient(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+        global: {
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+        },
+      },
     );
   }
 
@@ -46,43 +60,47 @@ export class UsuariosService {
   // ================================================================
 
   /**
-   * Crear un nuevo usuario en Supabase Auth y sincronizar en public.users (Admin)
+   * Crear un nuevo usuario en Supabase Auth y sincronizar en public.users
    */
   async crear(dto: CrearUsuarioDto) {
-    // Definir roles iniciales tolerando rolesIniciales o role
-    const rolesIniciales = dto.role || dto.role || [UserRole.ESTUDIANTE];
+    // 1. Determinar roles que vienen en la petición actual
+    const nuevosRoles = dto.roles?.length
+      ? dto.roles
+      : dto.role?.length
+      ? dto.role
+      : dto.rolesIniciales?.length
+      ? dto.rolesIniciales
+      : [UserRole.ESTUDIANTE];
 
-    // Si el email llega vacío, generar un correo ficticio único basado en documento
+    // Email ficticio si no viene
     const emailEsFicticio = !dto.email || !dto.email.trim();
     const emailFinal = emailEsFicticio
       ? `${dto.documento}@sistema.local`
       : dto.email!.trim();
 
-    // Validar duplicados en la base de datos local
-    const existe = await this.userRepository.findOne({
+    // 2. Verificar si el usuario ya existe en la BD por documento o email
+    const usuarioExistente = await this.userRepository.findOne({
       where: [{ documento: dto.documento }, { email: emailFinal }],
     });
 
-    if (existe) {
+    if (usuarioExistente) {
       throw new ConflictException(
         'Ya existe un usuario registrado con este documento o correo electrónico.',
       );
     }
 
-    // 1. Crear en Supabase Auth Admin
+    // 3. Crear en Supabase Auth Admin
     const { data: authUser, error: authError } =
       await this.supabase.auth.admin.createUser({
         email: emailFinal,
-        password: dto.password || dto.documento, // Si no envía contraseña, asigna el documento
+        password: dto.password || dto.documento,
         email_confirm: true,
         user_metadata: {
-          nombre: dto.nombre,
-          apellido: dto.apellido,
+          nombre:    dto.nombre,
+          apellido:  dto.apellido,
           documento: dto.documento,
         },
-        app_metadata: {
-          roles: rolesIniciales,
-        },
+        app_metadata: { roles: nuevosRoles },
       });
 
     if (authError || !authUser.user) {
@@ -91,27 +109,122 @@ export class UsuariosService {
       );
     }
 
-    // 2. Insertar en public.users reutilizando el UUID generado por Supabase Auth
-    const nuevoUsuario = this.userRepository.create({
-      id: authUser.user.id,
-      nombre: dto.nombre,
-      segundoNombre: dto.segundoNombre,
-      apellido: dto.apellido,
-      segundoApellido: dto.segundoApellido,
-      email: emailFinal,
-      emailFicticio: emailEsFicticio,
-      documento: dto.documento,
-      tipoIdentificacion: dto.tipoIdentificacion,
-      telefono: dto.telefono,
-      roles: rolesIniciales as UserRole[],
-      activo: true,
+    const userId = authUser.user.id;
+
+    // Pequeña espera por si hay un trigger en PostgreSQL/Supabase
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // 4. Consultar si el trigger de Supabase o un registro previo ya insertó en public.users
+    const usuarioDB = await this.userRepository.findOne({
+      where: { id: userId },
     });
 
-    await this.userRepository.save(nuevoUsuario);
+    // 5. UNIFICAR ROLES: Combinar los roles existentes en BD con los nuevos recibidos
+    const rolesPrevios = usuarioDB?.roles || [];
+    const rolesDefinitivos = Array.from(
+      new Set([...rolesPrevios, ...nuevosRoles]),
+    ) as UserRole[];
+
+    const datosBase = {
+      nombre:             dto.nombre,
+      segundoNombre:      dto.segundoNombre      ?? null,
+      apellido:           dto.apellido,
+      segundoApellido:    dto.segundoApellido    ?? null,
+      email:              emailFinal,
+      emailFicticio:      emailEsFicticio,
+      documento:          dto.documento,
+      tipoIdentificacion: dto.tipoIdentificacion ?? null,
+      telefono:           dto.telefono           ?? null,
+      genero:             dto.genero             ?? null,
+      fechaNacimiento:    dto.fechaNacimiento
+        ? (dto.fechaNacimiento.split('T')[0] as any)
+        : null,
+      roles:  rolesDefinitivos,
+      activo: true,
+    };
+
+    if (usuarioDB) {
+      await this.userRepository.update(userId, datosBase);
+    } else {
+      const nuevoUsuario = this.userRepository.create({
+        id: userId,
+        ...datosBase,
+      });
+      await this.userRepository.save(nuevoUsuario);
+    }
+
+    // Sincronizar roles unificados en app_metadata de Supabase Auth
+    await this.supabase.auth.admin.updateUserById(userId, {
+      app_metadata: { roles: rolesDefinitivos },
+    });
+
+    // 6. Actualizar caracterización, ubicación Y ROLES UNIFICADOS en PostgreSQL
+    await this.dataSource.query(
+      `UPDATE public.users SET
+        direccion               = $2,
+        barrio                  = $3,
+        municipio               = $4,
+        departamento            = $5,
+        pais                    = COALESCE($6, 'Colombia'),
+        municipio_nacimiento    = $7,
+        departamento_nacimiento = $8,
+        pais_nacimiento         = $9,
+        zona_residencia         = $10,
+        enfoque_poblacional     = $11,
+        tiene_discapacidad      = COALESCE($12, false),
+        tipo_discapacidad       = $13,
+        estrato                 = $14,
+        eps                     = $15,
+        roles                   = $16,
+        "updatedAt"             = NOW()
+      WHERE id = $1`,
+      [
+        userId,
+        dto.direccion              ?? null,
+        dto.barrio                 ?? null,
+        dto.municipio              ?? null,
+        dto.departamento           ?? null,
+        dto.pais                   ?? null,
+        dto.municipioNacimiento    ?? null,
+        dto.departamentoNacimiento ?? null,
+        dto.paisNacimiento         ?? null,
+        dto.zonaResidencia         ?? null,
+        dto.enfoquePoblacional     ?? null,
+        dto.tieneDiscapacidad      ?? null,
+        dto.tipoDiscapacidad       ?? null,
+        dto.estrato                ?? null,
+        dto.eps                    ?? null,
+        rolesDefinitivos,
+      ],
+    );
+
+    // 7. Datos de acudiente si aplica
+    if (dto.acudienteNombre) {
+      await this.dataSource.query(
+        `INSERT INTO perfiles_estudiante (
+          usuario_id, acudiente_nombre, acudiente_telefono, acudiente_parentesco
+        ) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (usuario_id) DO UPDATE SET
+          acudiente_nombre     = EXCLUDED.acudiente_nombre,
+          acudiente_telefono   = EXCLUDED.acudiente_telefono,
+          acudiente_parentesco = EXCLUDED.acudiente_parentesco`,
+        [
+          userId,
+          dto.acudienteNombre,
+          dto.acudienteTelefono   ?? null,
+          dto.acudienteParentesco ?? null,
+        ],
+      );
+    }
+
+    // 8. Retornar usuario con la lista acumulada de roles
+    const usuarioCompleto = await this.userRepository.findOne({
+      where: { id: userId },
+    });
 
     return {
       mensaje: 'Usuario creado exitosamente',
-      usuario: nuevoUsuario,
+      usuario: usuarioCompleto,
     };
   }
 
@@ -141,13 +254,34 @@ export class UsuariosService {
       existe: true,
       id: usuario.id,
       nombre: usuario.nombre,
+      segundoNombre: usuario.segundoNombre,
       apellido: usuario.apellido,
+      segundoApellido: usuario.segundoApellido,
       email: usuario.emailFicticio ? null : usuario.email,
       emailFicticio: usuario.emailFicticio,
       documento: usuario.documento,
       tipoIdentificacion: usuario.tipoIdentificacion,
-      fechaNacimiento: usuario.fechaNacimiento,
+      fechaNacimiento: usuario.fechaNacimiento
+        ? String(usuario.fechaNacimiento).split('T')[0]
+        : null,
       telefono: usuario.telefono,
+
+      direccion: usuario.direccion,
+      barrio: usuario.barrio,
+      pais: usuario.pais,
+      departamento: usuario.departamento,
+      municipio: usuario.municipio,
+      departamentoNacimiento: usuario.departamentoNacimiento,
+      municipioNacimiento: usuario.municipioNacimiento,
+      paisNacimiento: usuario.paisNacimiento,
+      enfoquePoblacional: usuario.enfoquePoblacional,
+      eps: usuario.eps,
+      estrato: usuario.estrato,
+      genero: usuario.genero,
+      zonaResidencia: usuario.zonaResidencia,
+      tieneDiscapacidad: usuario.tieneDiscapacidad,
+      tipoDiscapacidad: usuario.tipoDiscapacidad,
+
       roles: usuario.roles,
       activo: usuario.activo,
       perfil: perfilExtendido ?? null,
@@ -163,35 +297,90 @@ export class UsuariosService {
   /**
    * Actualiza datos generales del usuario y, opcionalmente, la información de acudiente.
    */
-  async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
-    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
-    if (!usuario) throw new NotFoundException('Usuario no encontrado');
+  // usuarios.service.ts — reemplaza completarPerfil() completo
+async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
+  const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+  if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
-    // 1. Actualizar entidad principal User
-    await this.actualizarDatosGeneralesUser(usuarioId, dto);
+  // Todo el perfil editable vive en public.users, igual que en crear()
+  await this.dataSource.query(
+    `UPDATE public.users SET
+      nombre                  = COALESCE($2, nombre),
+      segundo_nombre          = COALESCE($3, segundo_nombre),
+      apellido                = COALESCE($4, apellido),
+      segundo_apellido        = COALESCE($5, segundo_apellido),
+      tipo_identificacion     = COALESCE($6, tipo_identificacion),
+      telefono                = COALESCE($7, telefono),
+      genero                  = COALESCE($8, genero),
+      fecha_nacimiento        = COALESCE($9, fecha_nacimiento),
+      direccion                = COALESCE($10, direccion),
+      barrio                   = COALESCE($11, barrio),
+      municipio                = COALESCE($12, municipio),
+      departamento              = COALESCE($13, departamento),
+      pais                      = COALESCE($14, pais),
+      municipio_nacimiento     = COALESCE($15, municipio_nacimiento),
+      departamento_nacimiento  = COALESCE($16, departamento_nacimiento),
+      pais_nacimiento          = COALESCE($17, pais_nacimiento),
+      zona_residencia          = COALESCE($18, zona_residencia),
+      enfoque_poblacional      = COALESCE($19, enfoque_poblacional),
+      tiene_discapacidad       = COALESCE($20, tiene_discapacidad),
+      tipo_discapacidad        = COALESCE($21, tipo_discapacidad),
+      estrato                  = COALESCE($22, estrato),
+      eps                      = COALESCE($23, eps),
+      "updatedAt"              = NOW()
+    WHERE id = $1`,
+    [
+      usuarioId,
+      dto.nombre ?? null,
+      dto.segundoNombre ?? null,
+      dto.apellido ?? null,
+      dto.segundoApellido ?? null,
+      dto.tipoIdentificacion ?? null,
+      dto.telefono ?? null,
+      dto.genero ?? null,
+      dto.fechaNacimiento ? new Date(dto.fechaNacimiento) : null,
+      dto.direccion ?? null,
+      dto.barrio ?? null,
+      dto.municipio ?? null,
+      dto.departamento ?? null,
+      dto.pais ?? null,
+      dto.municipioNacimiento ?? null,
+      dto.departamentoNacimiento ?? null,
+      dto.paisNacimiento ?? null,
+      dto.zonaResidencia ?? null,
+      dto.enfoquePoblacional ?? null,
+      dto.tieneDiscapacidad ?? null,
+      dto.tipoDiscapacidad ?? null,
+      dto.estrato ?? null,
+      dto.eps ?? null,
+    ],
+  );
 
-    // 2. Si vienen datos de acudiente, upsert en perfiles_estudiante
-    if (dto.acudienteNombre || dto.acudienteTelefono || dto.acudienteParentesco) {
-      await this.dataSource.query(
-        `INSERT INTO perfiles_estudiante (
-          usuario_id, acudiente_nombre, acudiente_telefono, acudiente_parentesco, updated_at
-        ) VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (usuario_id) DO UPDATE SET
-          acudiente_nombre     = COALESCE(EXCLUDED.acudiente_nombre, perfiles_estudiante.acudiente_nombre),
-          acudiente_telefono   = COALESCE(EXCLUDED.acudiente_telefono, perfiles_estudiante.acudiente_telefono),
-          acudiente_parentesco = COALESCE(EXCLUDED.acudiente_parentesco, perfiles_estudiante.acudiente_parentesco),
-          updated_at           = NOW()`,
-        [
-          usuarioId,
-          dto.acudienteNombre ?? null,
-          dto.acudienteTelefono ?? null,
-          dto.acudienteParentesco ?? null,
-        ],
-      );
-    }
-
-    return { mensaje: 'Perfil general actualizado correctamente' };
+  // Roles: unión sin duplicados, sin borrar lo que ya tenía
+  if (dto.roles?.length) {
+    await this.dataSource.query(
+      `UPDATE public.users
+       SET roles = ARRAY(SELECT DISTINCT unnest(roles || $2::text[]))
+       WHERE id = $1`,
+      [usuarioId, dto.roles],
+    );
   }
+
+  // perfiles_estudiante: solo acudiente (todo lo demás ya no vive aquí)
+  if (dto.acudienteNombre || dto.acudienteTelefono || dto.acudienteParentesco) {
+    await this.dataSource.query(
+      `INSERT INTO perfiles_estudiante (usuario_id, acudiente_nombre, acudiente_telefono, acudiente_parentesco)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (usuario_id) DO UPDATE SET
+         acudiente_nombre     = COALESCE(EXCLUDED.acudiente_nombre, perfiles_estudiante.acudiente_nombre),
+         acudiente_telefono   = COALESCE(EXCLUDED.acudiente_telefono, perfiles_estudiante.acudiente_telefono),
+         acudiente_parentesco = COALESCE(EXCLUDED.acudiente_parentesco, perfiles_estudiante.acudiente_parentesco)`,
+      [usuarioId, dto.acudienteNombre ?? null, dto.acudienteTelefono ?? null, dto.acudienteParentesco ?? null],
+    );
+  }
+
+  return { mensaje: 'Perfil actualizado correctamente' };
+}
 
   /**
    * Guarda o actualiza los datos del perfil docente.
@@ -401,15 +590,15 @@ export class UsuariosService {
   /**
    * Agrega un nuevo rol al arreglo de roles sin duplicados y lo sincroniza en Supabase Auth.
    */
-  private async asegurarRol(usuario: User, nuevoRol: string) {
-    const rolesActuales = (usuario.roles as string[]) || [];
+  private async asegurarRol(usuario: User, nuevoRol: UserRole) {
+    const rolesActuales = (usuario.roles as UserRole[]) || [];
 
     if (!rolesActuales.includes(nuevoRol)) {
       const rolesActualizados = [...rolesActuales, nuevoRol];
 
       // 1. Guardar en Base de Datos PostgreSQL
       await this.userRepository.update(usuario.id, {
-        roles: rolesActualizados as UserRole[],
+        roles: rolesActualizados,
       });
 
       // 2. Actualizar metadatos en Supabase Auth Admin
@@ -426,11 +615,16 @@ export class UsuariosService {
     usuarioId: string,
     dto: CompletarPerfilDto,
   ) {
+    // Extracción plana de fecha YYYY-MM-DD sin new Date() para evitar desfase UTC-5
+    const fechaLimpia = dto.fechaNacimiento
+      ? dto.fechaNacimiento.split('T')[0]
+      : undefined;
+
     await this.userRepository.update(usuarioId, {
       ...(dto.nombre && { nombre: dto.nombre }),
       ...(dto.apellido && { apellido: dto.apellido }),
       ...(dto.telefono && { telefono: dto.telefono }),
-      ...(dto.fechaNacimiento && { fechaNacimiento: new Date(dto.fechaNacimiento) }),
+      ...(fechaLimpia && { fechaNacimiento: fechaLimpia as any }),
       ...(dto.tipoIdentificacion && { tipoIdentificacion: dto.tipoIdentificacion }),
       ...(dto.segundoNombre && { segundoNombre: dto.segundoNombre }),
       ...(dto.segundoApellido && { segundoApellido: dto.segundoApellido }),
@@ -462,6 +656,12 @@ export class UsuariosService {
     if (!usuario.telefono) faltantes.push('telefono');
     if (!usuario.fechaNacimiento) faltantes.push('fechaNacimiento');
     if (!usuario.documento) faltantes.push('documento');
+    if (!usuario.enfoquePoblacional) faltantes.push('enfoquePoblacional');
+    if (!usuario.zonaResidencia) faltantes.push('zonaResidencia');
+    if (!usuario.genero) faltantes.push('genero');
+    if (!usuario.estrato) faltantes.push('estrato');
+    if (!usuario.eps) faltantes.push('eps');
+
     return faltantes;
   }
 }
