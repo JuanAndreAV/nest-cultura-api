@@ -3,7 +3,7 @@ import {
   BadRequestException, ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Inscripcion, EstadoInscripcion } from './entities/inscripcione.entity';
 import { CreateInscripcionDto, CambiarEstadoDto } from './dto/create-inscripcione.dto';
 import { CursosService } from '../cursos/cursos.service';
@@ -39,6 +39,7 @@ export class InscripcionesService {
   // ----------------------------------------------------------------
   async inscribir(dto: CreateInscripcionDto): Promise<Inscripcion> {
     await this.validarInscripcion(dto.usuarioId, dto.cursoId);
+    await this.cursosService.validarCupos(dto.cursoId);
 
     const inscripcion = this.inscripcionRepository.create({
       usuarioId:     dto.usuarioId,
@@ -122,13 +123,18 @@ export class InscripcionesService {
     });
   }
 
-  async listarPorEstudiante(usuarioId: string): Promise<Inscripcion[]> {
-    return this.inscripcionRepository.find({
-      where:     { usuarioId },
-      relations: ['curso', 'curso.asignatura', 'curso.horarios', 'curso.horarios.aula'],
-      order:     { createdAt: 'DESC' },
-    });
+// InscripcionesService
+async listarPorEstudiante(usuarioId: string, soloActivas = false): Promise<Inscripcion[]> {
+  const where: any = { usuarioId };
+  if (soloActivas) {
+    where.estado = In([EstadoInscripcion.ACTIVA, EstadoInscripcion.PENDIENTE]);
   }
+  return this.inscripcionRepository.find({
+    where,
+    relations: ['curso', 'curso.asignatura'],
+    order: { createdAt: 'DESC' },
+  });
+}
 
   async listarPendientes(docenteId?: string): Promise<Inscripcion[]> {
     const query = this.inscripcionRepository

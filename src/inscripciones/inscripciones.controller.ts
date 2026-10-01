@@ -1,6 +1,7 @@
 import {
   Controller, Get, Post, Patch,
   Param, Body, UseGuards, Query,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InscripcionesService } from './inscripciones.service';
 import { CreateInscripcionDto, CambiarEstadoDto } from './dto/create-inscripcione.dto';
@@ -10,7 +11,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @Controller('inscripciones')
-
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class InscripcionesController {
   constructor(private readonly inscripcionesService: InscripcionesService) {}
 
@@ -22,7 +23,6 @@ export class InscripcionesController {
 
   // Inscripción directa — solo admin
   @Post()
-  //@UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   inscribir(@Body() dto: CreateInscripcionDto) {
     return this.inscripcionesService.inscribir(dto);
@@ -30,7 +30,7 @@ export class InscripcionesController {
 
   // Aprobar pre-inscripción — admin o docente
   @Patch(':id/aprobar')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  
   @Roles('admin', 'docente')
   aprobar(@Param('id') id: string, @CurrentUser() user: any) {
     return this.inscripcionesService.aprobar(id, user);
@@ -39,7 +39,6 @@ export class InscripcionesController {
   // Cambiar estado — admin, docente, o el propio estudiante
   //pendiente de revisar este punto, ya que el estudiante no debería poder cambiar su estado a activa o cancelada, solo a cancelada
   @Patch(':id/estado')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   cambiarEstado(
     @Param('id') id: string,
@@ -51,7 +50,6 @@ export class InscripcionesController {
 
   // Listar por curso — admin y docente
   @Get('curso/:cursoId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   listarPorCurso(@Param('cursoId') cursoId: string) {
     return this.inscripcionesService.listarPorCurso(cursoId);
@@ -59,19 +57,19 @@ export class InscripcionesController {
 
   // Listar por estudiante — el propio estudiante o admin
   @Get('estudiante/:usuarioId')
-  listarPorEstudiante(
-    @Param('usuarioId') usuarioId: string,
-    @CurrentUser() user: any,
-  ) {
-    if (!user.es_admin && user.id !== usuarioId) {
-      throw new Error('No puedes ver las inscripciones de otro estudiante.');
-    }
-    return this.inscripcionesService.listarPorEstudiante(usuarioId);
+listarPorEstudiante(
+  @Param('usuarioId') usuarioId: string,
+  @Query('soloActivas') soloActivas: string,
+  @CurrentUser() user: any,
+) {
+  if (!user.es_admin && user.id !== usuarioId) {
+    throw new ForbiddenException('No puedes ver las inscripciones de otro estudiante.');
   }
+  return this.inscripcionesService.listarPorEstudiante(usuarioId, soloActivas === 'true');
+}
 
   // Listar pendientes — admin ve todas, docente ve las de sus cursos
   @Get('pendientes')
-   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'docente')
   listarPendientes(@CurrentUser() user: any) {
     const docenteId = user.roles.includes('docente') ? user.id : undefined;

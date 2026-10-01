@@ -1,11 +1,12 @@
 import {
   Entity, PrimaryGeneratedColumn, Column,
-  CreateDateColumn, ManyToOne, JoinColumn,
+  CreateDateColumn, ManyToOne, JoinColumn, Unique,
 } from 'typeorm';
 import { Inscripcion } from '../../inscripciones/entities/inscripcione.entity';
 import { User } from '../../auth/entities/user.entity';
 
 @Entity('asistencias')
+@Unique(['inscripcionId', 'fecha'])
 export class Asistencia {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -14,7 +15,7 @@ export class Asistencia {
   inscripcionId: string;
 
   @Column({ type: 'date' })
-  fecha: Date;
+  fecha: string; // 'YYYY-MM-DD' — sin pasar por new Date()
 
   @Column({ type: 'boolean', default: false })
   asistio: boolean;

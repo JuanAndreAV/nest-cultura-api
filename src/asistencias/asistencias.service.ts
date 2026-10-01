@@ -1,46 +1,71 @@
 import {
-  Injectable, NotFoundException, BadRequestException,
+  Injectable, NotFoundException, BadRequestException, ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Asistencia } from './entities/asistencia.entity';
-import {
-  CreateAsistenciaDto, RegistroMasivoDto,
-} from './dto/create-asistencia.dto';
+import { Inscripcion } from '../inscripciones/entities/inscripcione.entity';
+import { CreateAsistenciaDto, RegistroMasivoDto } from './dto/create-asistencia.dto';
+import { CursosService } from '../cursos/cursos.service';
 
 @Injectable()
 export class AsistenciasService {
   constructor(
     @InjectRepository(Asistencia)
     private readonly asistenciaRepository: Repository<Asistencia>,
+    @InjectRepository(Inscripcion)
+    private readonly inscripcionRepository: Repository<Inscripcion>,
+    private readonly cursosService: CursosService,
   ) {}
+
+  // ----------------------------------------------------------------
+  // VALIDACIÓN DE PROPIEDAD — reutilizada en todos los métodos
+  // ----------------------------------------------------------------
+  private async validarPropiedadCurso(cursoId: string, usuario: any): Promise<void> {
+    if (usuario.es_admin) return;
+
+    const curso = await this.cursosService.ver(cursoId);
+    if (curso.docenteId !== usuario.id) {
+      throw new ForbiddenException('Solo puedes gestionar asistencia de tus propios cursos.');
+    }
+  }
+
+  private async obtenerInscripcionConCurso(inscripcionId: string): Promise<Inscripcion> {
+    const inscripcion = await this.inscripcionRepository.findOne({
+      where: { id: inscripcionId },
+      relations: ['curso'],
+    });
+    if (!inscripcion) throw new NotFoundException('Inscripción no encontrada');
+    return inscripcion;
+  }
 
   // ----------------------------------------------------------------
   // REGISTRAR UNA ASISTENCIA
   // ----------------------------------------------------------------
-  async registrar(dto: CreateAsistenciaDto, registradoPor: string): Promise<Asistencia> {
-    // Verificar si ya existe asistencia para esa inscripción en esa fecha
+  async registrar(dto: CreateAsistenciaDto, usuario: any): Promise<Asistencia> {
+    const inscripcion = await this.obtenerInscripcionConCurso(dto.inscripcionId);
+
+    if (!usuario.es_admin && inscripcion.curso.docenteId !== usuario.id) {
+      throw new ForbiddenException('Solo puedes registrar asistencia de tus propios cursos.');
+    }
+
     const existe = await this.asistenciaRepository.findOne({
-      where: {
-        inscripcionId: dto.inscripcionId,
-        fecha:         new Date(dto.fecha) as any,
-      },
+      where: { inscripcionId: dto.inscripcionId, fecha: dto.fecha },
     });
 
     if (existe) {
-      // Actualizar en lugar de crear
-      existe.asistio      = dto.asistio;
-      existe.observacion  = dto.observacion ?? existe.observacion;
-      existe.registradoPor = registradoPor;
+      existe.asistio       = dto.asistio;
+      existe.observacion   = dto.observacion ?? existe.observacion;
+      existe.registradoPor = usuario.id;
       return this.asistenciaRepository.save(existe);
     }
 
     const asistencia = this.asistenciaRepository.create({
       inscripcionId: dto.inscripcionId,
-      fecha:         new Date(dto.fecha) as any,
+      fecha:         dto.fecha,
       asistio:       dto.asistio,
       observacion:   dto.observacion ?? null,
-      registradoPor,
+      registradoPor: usuario.id,
     });
 
     return this.asistenciaRepository.save(asistencia);
@@ -48,49 +73,45 @@ export class AsistenciasService {
 
   // ----------------------------------------------------------------
   // REGISTRO MASIVO — todo el curso en una fecha
-  // El docente pasa lista de todos los estudiantes a la vez
+  // upsert nativo — requiere el @Unique(['inscripcionId', 'fecha'])
   // ----------------------------------------------------------------
-  async registrarMasivo(dto: RegistroMasivoDto, registradoPor: string): Promise<{
-    registradas: number;
-    actualizadas: number;
+  async registrarMasivo(dto: RegistroMasivoDto, usuario: any): Promise<{
+    procesadas: number;
   }> {
-    let registradas  = 0;
-    let actualizadas = 0;
+    await this.validarPropiedadCurso(dto.cursoId, usuario);
 
-    for (const item of dto.asistencias) {
-      const existe = await this.asistenciaRepository.findOne({
-        where: {
-          inscripcionId: item.inscripcionId,
-          fecha:         new Date(dto.fecha) as any,
-        },
-      });
-
-      if (existe) {
-        existe.asistio       = item.asistio;
-        existe.observacion   = item.observacion ?? existe.observacion;
-        existe.registradoPor = registradoPor;
-        await this.asistenciaRepository.save(existe);
-        actualizadas++;
-      } else {
-        const asistencia = this.asistenciaRepository.create({
-          inscripcionId: item.inscripcionId,
-          fecha:         new Date(dto.fecha) as any,
-          asistio:       item.asistio,
-          observacion:   item.observacion ?? null,
-          registradoPor,
-        });
-        await this.asistenciaRepository.save(asistencia);
-        registradas++;
-      }
+    if (!dto.asistencias.length) {
+      return { procesadas: 0 };
     }
 
-    return { registradas, actualizadas };
+    await this.asistenciaRepository.upsert(
+      dto.asistencias.map(item => ({
+        inscripcionId: item.inscripcionId,
+        fecha:         dto.fecha,
+        asistio:       item.asistio,
+        observacion:   item.observacion ?? null,
+        registradoPor: usuario.id,
+      })),
+      ['inscripcionId', 'fecha'],
+    );
+
+    return { procesadas: dto.asistencias.length };
   }
 
   // ----------------------------------------------------------------
   // LISTAR POR INSCRIPCIÓN — historial de un estudiante en un curso
+  // Accesible por: el propio estudiante, el docente del curso, o admin
   // ----------------------------------------------------------------
-  async listarPorInscripcion(inscripcionId: string): Promise<Asistencia[]> {
+  async listarPorInscripcion(inscripcionId: string, usuario: any): Promise<Asistencia[]> {
+    const inscripcion = await this.obtenerInscripcionConCurso(inscripcionId);
+
+    const esPropia        = inscripcion.usuarioId === usuario.id;
+    const esDocenteDeCurso = inscripcion.curso.docenteId === usuario.id;
+
+    if (!usuario.es_admin && !esPropia && !esDocenteDeCurso) {
+      throw new ForbiddenException('No puedes ver la asistencia de otro estudiante.');
+    }
+
     return this.asistenciaRepository.find({
       where: { inscripcionId },
       order: { fecha: 'DESC' },
@@ -100,7 +121,9 @@ export class AsistenciasService {
   // ----------------------------------------------------------------
   // LISTAR POR CURSO Y FECHA — para pasar lista
   // ----------------------------------------------------------------
-  async listarPorCursoYFecha(cursoId: string, fecha: string): Promise<any[]> {
+  async listarPorCursoYFecha(cursoId: string, fecha: string, usuario: any): Promise<any[]> {
+    await this.validarPropiedadCurso(cursoId, usuario);
+
     return this.asistenciaRepository
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.inscripcion', 'i')
@@ -125,35 +148,24 @@ export class AsistenciasService {
 
   // ----------------------------------------------------------------
   // RESUMEN DE ASISTENCIA — para reportes en Angular
-  // Usa la vista v_asistencia_resumen
   // ----------------------------------------------------------------
-  async resumenPorCurso(cursoId: string): Promise<any[]> {
-    return this.asistenciaRepository
-      .createQueryBuilder('a')
-      .leftJoin('a.inscripcion', 'i')
-      .leftJoin('i.usuario', 'u')
-      .where('i.curso_id = :cursoId', { cursoId })
-      .andWhere('i.estado = :estado', { estado: 'activa' })
-      .select([
-        'u.id                                                AS usuario_id',
-        'u.nombre                                           AS nombre',
-        'u.apellido                                         AS apellido',
-        'COUNT(a.id)                                        AS total_clases',
-        'SUM(CASE WHEN a.asistio THEN 1 ELSE 0 END)        AS clases_asistidas',
-        `ROUND(
-          SUM(CASE WHEN a.asistio THEN 1 ELSE 0 END)
-          * 100.0 / NULLIF(COUNT(a.id), 0), 1
-        )                                                   AS porcentaje`,
-      ])
-      .groupBy('u.id, u.nombre, u.apellido')
-      .orderBy('u.apellido', 'ASC')
-      .getRawMany();
-  }
+async resumenPorCurso(cursoId: string, usuario: any): Promise<any[]> {
+  await this.validarPropiedadCurso(cursoId, usuario);
+
+  return this.asistenciaRepository.manager.query(
+    `SELECT * FROM v_asistencia_resumen 
+     WHERE curso_id = $1 AND estado_inscripcion = 'activa'
+     ORDER BY curso ASC`,
+    [cursoId],
+  );
+}
 
   // ----------------------------------------------------------------
   // FECHAS CON CLASE — para el calendario del docente
   // ----------------------------------------------------------------
-  async fechasRegistradas(cursoId: string): Promise<{ fecha: string; total: number; presentes: number }[]> {
+  async fechasRegistradas(cursoId: string, usuario: any): Promise<{ fecha: string; total: number; presentes: number }[]> {
+    await this.validarPropiedadCurso(cursoId, usuario);
+
     return this.asistenciaRepository
       .createQueryBuilder('a')
       .leftJoin('a.inscripcion', 'i')
@@ -167,4 +179,27 @@ export class AsistenciasService {
       .orderBy('a.fecha', 'DESC')
       .getRawMany();
   }
+// ----------------------------------------------------------------
+// RESUMEN POR INSCRIPCIÓN — usa la vista v_asistencia_resumen
+// Accesible por: el propio estudiante, el docente del curso, o admin
+// ----------------------------------------------------------------
+async resumenPorInscripcion(inscripcionId: string, usuario: any): Promise<any> {
+  const inscripcion = await this.obtenerInscripcionConCurso(inscripcionId);
+
+  const esPropia         = inscripcion.usuarioId === usuario.id;
+  const esDocenteDeCurso = inscripcion.curso.docenteId === usuario.id;
+
+  if (!usuario.es_admin && !esPropia && !esDocenteDeCurso) {
+    throw new ForbiddenException('No puedes ver la asistencia de otro estudiante.');
+  }
+
+  const [resumen] = await this.asistenciaRepository.manager.query(
+    `SELECT * FROM v_asistencia_resumen WHERE inscripcion_id = $1`,
+    [inscripcionId],
+  );
+
+  if (!resumen) throw new NotFoundException('No hay resumen de asistencia para esta inscripción');
+
+  return resumen;
+}
 }
