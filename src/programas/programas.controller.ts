@@ -1,6 +1,7 @@
 import {
   Controller, Get, Post, Put, Delete,
   Param, Body, UseGuards,
+  Query,
 } from '@nestjs/common';
 import { ProgramasService } from './programas.service';
 import { CreateProgramaDto } from './dto/create-programa.dto';
@@ -8,60 +9,70 @@ import { CreatePeriodoDto } from './dto/create-periodo.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { AreaArtistica } from './entities/programa.entity';
 
 @Controller('programas')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProgramasController {
   constructor(private readonly programasService: ProgramasService) {}
 
-   // ----------------------------------------------------------------
-  // PERIODOS
   // ----------------------------------------------------------------
-  // Periodos — rutas independientes
-@Post('periodos')
-@Roles('admin')
-crearPeriodo(@Body() dto: CreatePeriodoDto) {
-  return this.programasService.crearPeriodo(dto);
-}
+  // RUTAS ESPECÍFICAS / ESTáticas (Primero)
+  // ----------------------------------------------------------------
 
-@Get('periodos')
-//@Roles('admin')
-listarPeriodos() {
-  return this.programasService.listarPeriodos();
-}
+  @Get('areas')
+  listarAreas() {
+    return this.programasService.listarAreas();
+  }
 
-@Get('periodos/activo')
-periodoActivo() {
-  return this.programasService.periodoActivo();
-}
+  @Get('periodos')
+  listarPeriodos() {
+    return this.programasService.listarPeriodos();
+  }
 
-@Put('periodos/:id')
-@Roles('admin')
-actualizarPeriodo(
-  @Param('id') id: string,
-  @Body() dto: Partial<CreatePeriodoDto>,
-) {
-  return this.programasService.actualizarPeriodo(id, dto);
-}
+  @Get('periodos/activo')
+  periodoActivo() {
+    return this.programasService.periodoActivo();
+  }
 
-@Delete('periodos/:id')
-@Roles('admin')
-desactivarPeriodo(@Param('id') id: string) {
-  return this.programasService.desactivarPeriodo(id);
-}
+  @Get()
+  listar(@Query('area') area?: AreaArtistica) {
+    return this.programasService.listarProgramas(area);
+  }
 
   // ----------------------------------------------------------------
-  // PROGRAMAS
+  // PERIODOS - ACCIONES DE ESCRITURA
   // ----------------------------------------------------------------
+
+  @Post('periodos')
+  @Roles('admin')
+  crearPeriodo(@Body() dto: CreatePeriodoDto) {
+    return this.programasService.crearPeriodo(dto);
+  }
+
+  @Put('periodos/:id')
+  @Roles('admin')
+  actualizarPeriodo(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreatePeriodoDto>,
+  ) {
+    return this.programasService.actualizarPeriodo(id, dto);
+  }
+
+  @Delete('periodos/:id')
+  @Roles('admin')
+  desactivarPeriodo(@Param('id') id: string) {
+    return this.programasService.desactivarPeriodo(id);
+  }
+
+  // ----------------------------------------------------------------
+  // PROGRAMAS - ACCIONES DE ESCRITURA Y DINÁMICAS (Al final)
+  // ----------------------------------------------------------------
+
   @Post()
   @Roles('admin')
   crear(@Body() dto: CreateProgramaDto) {
     return this.programasService.crearPrograma(dto);
-  }
-
-  @Get()
-  listar() {
-    return this.programasService.listarProgramas();
   }
 
   @Get(':id')
@@ -80,6 +91,4 @@ desactivarPeriodo(@Param('id') id: string) {
   desactivar(@Param('id') id: string) {
     return this.programasService.desactivarPrograma(id);
   }
-
- 
 }

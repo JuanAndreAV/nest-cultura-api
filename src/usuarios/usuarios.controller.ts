@@ -71,6 +71,11 @@ export class UsuariosController {
   listar(@Query() filtros: FiltroUsuariosDto) {
     return this.usuariosService.listar(filtros);
   }
+  @Get('docentes')
+  @Roles('admin')
+  async listarDocentes(){
+    return await this.usuariosService.obtenerDocentes()
+  }
 
   // Marcar inactivos — solo admin
   @Patch('marcar-inactivos')

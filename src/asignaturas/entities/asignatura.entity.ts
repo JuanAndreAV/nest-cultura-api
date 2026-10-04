@@ -9,8 +9,7 @@ export class Asignatura {
 
   // ← ya no tiene programaId ni la relación ManyToOne con Programa
 
-  @Column({ type: 'uuid', name: 'docente_id', nullable: true })
-  docenteId: string | null;
+  
 
   @Column({ type: 'text' })
   nombre: string;
@@ -27,9 +26,7 @@ export class Asignatura {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @ManyToOne(() => User)
-  @JoinColumn({ name: 'docente_id' })
-  docente: User;
+  
 
   @OneToMany(() => Pensum, pensum => pensum.asignatura)
   pensum: Pensum[];

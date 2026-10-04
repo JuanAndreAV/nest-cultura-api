@@ -69,11 +69,11 @@ export class InscripcionesService {
     }
 
     // Verificar que el docente solo apruebe inscripciones de sus cursos
-    if (!usuarioQueAprueba.es_admin) {
-      if (inscripcion.curso.docenteId !== usuarioQueAprueba.id) {
-        throw new ForbiddenException('Solo puedes aprobar inscripciones de tus cursos.');
-      }
-    }
+    // if (!usuarioQueAprueba.es_admin) {
+    //   if (inscripcion.curso.docenteId !== usuarioQueAprueba.id) {
+    //     throw new ForbiddenException('Solo puedes aprobar inscripciones de tus cursos.');
+    //   }
+    // }
 
     // Verificar cupos antes de aprobar
     await this.cursosService.validarCupos(inscripcion.cursoId);
@@ -98,14 +98,14 @@ export class InscripcionesService {
     if (!inscripcion) throw new NotFoundException('Inscripción no encontrada');
 
     // Estudiante solo puede retirarse de sus propias inscripciones
-    if (!usuarioActual.es_admin && !usuarioActual.es_docente) {
-      if (inscripcion.usuarioId !== usuarioActual.id) {
-        throw new ForbiddenException('No puedes modificar esta inscripción.');
-      }
-      if (dto.estado !== EstadoInscripcion.RETIRADA) {
-        throw new ForbiddenException('Solo puedes retirarte de un curso.');
-      }
-    }
+    // if (!usuarioActual.es_admin && !usuarioActual.es_docente) {
+    //   if (inscripcion.usuarioId !== usuarioActual.id) {
+    //     throw new ForbiddenException('No puedes modificar esta inscripción.');
+    //   }
+    //   // if (dto.estado !== EstadoInscripcion.RETIRADA) {
+    //   //   throw new ForbiddenException('Solo puedes retirarte de un curso.');
+    //   // }
+    // }
 
     inscripcion.estado        = dto.estado;
     inscripcion.observaciones = dto.observaciones ?? inscripcion.observaciones;
@@ -182,5 +182,15 @@ async listarPorEstudiante(usuarioId: string, soloActivas = false): Promise<Inscr
 
     // Verificar cupos solo para inscripción directa
     // Para pre-inscripción se validan al aprobar
+  };
+  async eliminarInscripcion(inscripcionId: string){
+    const inscripcion = await this.inscripcionRepository.findOne({
+      where: {id: inscripcionId}
+    });
+    if (!inscripcion){
+      throw new NotFoundException('No se encontró inscripción')
+    }
+    await this.inscripcionRepository.delete(inscripcionId);
+    return {mensaje: 'Inscripción eliminada con éxito!'}
   }
 }

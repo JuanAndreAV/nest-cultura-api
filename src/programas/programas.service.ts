@@ -9,6 +9,7 @@ import { Programa } from './entities/programa.entity';
 import { Periodo } from './entities/periodo.entity';
 import { CreateProgramaDto } from './dto/create-programa.dto';
 import { CreatePeriodoDto } from './dto/create-periodo.dto';
+import { AreaArtistica } from './entities/programa.entity';
 
 @Injectable()
 export class ProgramasService {
@@ -32,6 +33,7 @@ export class ProgramasService {
 
     const programa = this.programaRepository.create({
       nombre:      dto.nombre,
+      area:        dto.area,
       descripcion: dto.descripcion ?? null,
       colorHex:    dto.colorHex ?? '#6366f1',
     });
@@ -39,13 +41,16 @@ export class ProgramasService {
     return this.programaRepository.save(programa);
   }
 
-  async listarProgramas(): Promise<Programa[]> {
-    return this.programaRepository.find({
-      where:   { activo: true },
-      order:   { nombre: 'ASC' },
-      
-    });
-  }
+  async listarProgramas(area?: AreaArtistica): Promise<Programa[]> {
+  return this.programaRepository.find({
+    where: { activo: true, ...(area && { area }) },
+    order: { nombre: 'ASC' },
+  });
+}
+
+listarAreas(): string[] {
+  return Object.values(AreaArtistica);
+}
 
   async verPrograma(id: string): Promise<Programa> {
     const programa = await this.programaRepository.findOne({
@@ -62,6 +67,7 @@ export class ProgramasService {
 
     Object.assign(programa, {
       ...(dto.nombre      && { nombre: dto.nombre }),
+      ...(dto.area && { area: dto.area }),
       ...(dto.descripcion && { descripcion: dto.descripcion }),
       ...(dto.colorHex    && { colorHex: dto.colorHex }),
     });

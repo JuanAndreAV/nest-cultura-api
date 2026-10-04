@@ -28,7 +28,7 @@ export class AsignaturasService {
     }
 
     const asignatura = this.asignaturaRepository.create({
-      docenteId:   dto.docenteId ?? null,
+     
       nombre:      dto.nombre,
       descripcion: dto.descripcion ?? null,
     });
@@ -53,7 +53,6 @@ export class AsignaturasService {
         .createQueryBuilder('a')
         .leftJoinAndSelect('a.pensum', 'pn')
         .leftJoinAndSelect('pn.programa', 'pr')
-        .leftJoinAndSelect('a.docente', 'd')
         .where('pn.programa_id = :programaId', { programaId })
         .andWhere('a.activo = true')
         .orderBy('pn.orden', 'ASC')
@@ -63,7 +62,7 @@ export class AsignaturasService {
 
     return this.asignaturaRepository.find({
       where:     { activo: true },
-      relations: ['pensum', 'pensum.programa', 'docente'],
+      relations: ['pensum', 'pensum.programa'],
       order:     { nombre: 'ASC' },
     });
   }
@@ -74,7 +73,7 @@ export class AsignaturasService {
   async ver(id: string): Promise<Asignatura> {
     const asignatura = await this.asignaturaRepository.findOne({
       where:     { id },
-      relations: ['pensum', 'pensum.programa', 'docente'],
+      relations: ['pensum', 'pensum.programa'],
     });
     if (!asignatura) throw new NotFoundException('Asignatura no encontrada');
     return asignatura;
@@ -90,7 +89,7 @@ export class AsignaturasService {
     Object.assign(asignatura, {
       ...(dto.nombre      && { nombre: dto.nombre }),
       ...(dto.descripcion && { descripcion: dto.descripcion }),
-      ...(dto.docenteId   && { docenteId: dto.docenteId }),
+      
     });
 
     await this.asignaturaRepository.save(asignatura);

@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch,
   Param, Body, UseGuards, Query,
   ForbiddenException,
+  Delete,
 } from '@nestjs/common';
 import { InscripcionesService } from './inscripciones.service';
 import { CreateInscripcionDto, CambiarEstadoDto } from './dto/create-inscripcione.dto';
@@ -75,5 +76,10 @@ listarPorEstudiante(
     const docenteId = user.roles.includes('docente') ? user.id : undefined;
     //console.log('Listando inscripciones pendientes para docenteId:', user.roles, docenteId);
     return this.inscripcionesService.listarPendientes(docenteId);
+  }
+  @Delete(':id')
+  @Roles('admin')
+   eliminarInscripcion(@Param('id') id: string){
+    return  this.inscripcionesService.eliminarInscripcion(id);
   }
 }

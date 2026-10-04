@@ -16,9 +16,7 @@ export class PensumItemDto {
 }
 
 export class CreateAsignaturaDto {
-  @IsUUID()
-  @IsOptional()
-  docenteId?: string;
+  
 
   @IsString()
   nombre: string;

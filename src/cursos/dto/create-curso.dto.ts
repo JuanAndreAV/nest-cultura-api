@@ -29,7 +29,7 @@ export class CreateCursoDto {
 
   @IsUUID()
   @IsOptional()
-  docenteId?: string;
+  docenteId?: string ;
 
   @IsString()
   nombre: string;

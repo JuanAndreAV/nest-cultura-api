@@ -117,7 +117,7 @@ export class CursosService {
       Object.assign(curso, {
         ...(dto.nombre                  && { nombre: dto.nombre }),
         ...(dto.descripcion             && { descripcion: dto.descripcion }),
-        ...(dto.docenteId               && { docenteId: dto.docenteId }),
+        ...(dto.docenteId !== undefined && {docenteId: dto.docenteId}),
         ...(dto.capacidadMax            && { capacidadMax: dto.capacidadMax }),
         ...(dto.edadMin                 && { edadMin: dto.edadMin }),
         ...(dto.edadMax                 && { edadMax: dto.edadMax }),
@@ -370,4 +370,60 @@ export class CursosService {
     }
     throw new InternalServerErrorException(`Error inesperado en el servidor: ${error.message}`);
   }
+  async ofertaPublica(periodoId?: string) {
+  const qb = this.cursoRepository.createQueryBuilder('c')
+    .leftJoinAndSelect('c.asignatura', 'a')
+    .leftJoinAndSelect('a.pensum', 'pn')
+    .leftJoinAndSelect('pn.programa', 'pr')
+    .leftJoinAndSelect('c.periodo', 'p')
+    .leftJoinAndSelect('c.docente', 'd')
+    .leftJoinAndSelect('c.horarios', 'h')
+    .leftJoinAndSelect('h.aula', 'au')
+    .where('c.activo = true')
+    .andWhere('p.activo = true')
+    .orderBy('c.nombre', 'ASC');
+
+  if (periodoId) qb.andWhere('p.id = :periodoId', { periodoId });
+  else           qb.andWhere('p.fecha_fin >= CURRENT_DATE');
+
+  const cursos = await qb.getMany();
+  if (!cursos.length) return [];
+
+  const conteos: { curso_id: string; total: number }[] =
+    await this.cursoRepository.manager.query(
+      `SELECT curso_id, COUNT(*)::int AS total
+       FROM inscripciones
+       WHERE curso_id = ANY($1::uuid[]) AND estado = 'activa'
+       GROUP BY curso_id`,
+      [cursos.map(c => c.id)],
+    );
+  const inscritosPorCurso = new Map(conteos.map(c => [c.curso_id, c.total]));
+
+  return cursos.map(c => {
+    const inscritos = inscritosPorCurso.get(c.id) ?? 0;
+    return {
+      id:             c.id,
+      nombre:         c.nombre,
+      descripcion:    c.descripcion,
+      asignatura:     c.asignatura?.nombre ?? '',
+      programas:      [...new Set((c.asignatura?.pensum ?? []).map(p => p.programa?.nombre).filter(Boolean))],
+      areas:          [...new Set((c.asignatura?.pensum ?? []).map(p => p.programa?.area).filter(Boolean))],
+      periodo:        c.periodo?.nombre ?? '',
+      docente:        c.docente
+        ? { nombre: c.docente.nombre, apellido: c.docente.apellido, fotoUrl: c.docente.fotoUrl }
+        : null,
+      capacidadMax:   c.capacidadMax,
+      inscritos,
+      cuposDisponibles: Math.max(c.capacidadMax - inscritos, 0),
+      edadMin:        c.edadMin,
+      edadMax:        c.edadMax,
+      horarios: (c.horarios ?? []).map(h => ({
+        diaSemana:  h.diaSemana,
+        horaInicio: h.horaInicio.slice(0, 5),
+        horaFin:    h.horaFin.slice(0, 5),
+        aula:       h.aula?.nombre ?? null,
+      })),
+    };
+  });
+}
 }
