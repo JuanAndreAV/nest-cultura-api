@@ -426,4 +426,22 @@ export class CursosService {
     };
   });
 }
+async reasignarDocente(desdeId: string, haciaId: string, periodoId?: string) {
+  if (desdeId === haciaId) throw new BadRequestException('Elige un docente distinto.');
+
+  const [destino] = await this.cursoRepository.manager.query(
+    `SELECT 1 FROM users WHERE id = $1 AND activo = true AND 'docente' = ANY(roles)`,
+    [haciaId],
+  );
+  if (!destino) throw new BadRequestException('El docente de destino no existe, está inactivo o no tiene rol docente.');
+
+  const qb = this.cursoRepository.createQueryBuilder()
+    .update(Curso)
+    .set({ docenteId: haciaId })
+    .where('docente_id = :desdeId AND activo = true', { desdeId });
+  if (periodoId) qb.andWhere('periodo_id = :periodoId', { periodoId });
+
+  const r = await qb.execute();
+  return { mensaje: `${r.affected ?? 0} curso(s) reasignado(s).`, afectados: r.affected ?? 0 };
+}
 }

@@ -15,7 +15,8 @@ import { UserRolEntity as UsuarioRol } from './entities/user-rol.entity';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private supabaseClient: SupabaseClient; 
+  private supabaseClient: SupabaseClient; // consultas y admin
+  private authClient: SupabaseClient;     // solo signIn / refresh
 
   constructor(
     @InjectRepository(User)
@@ -23,9 +24,16 @@ export class AuthService {
     @InjectRepository(UsuarioRol)
     private readonly rolRepository: Repository<UsuarioRol>,
   ) {
+    const opts = { auth: { persistSession: false, autoRefreshToken: false } };
     this.supabaseClient = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      opts,
+    );
+    this.authClient = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      opts,
     );
   }
 
@@ -38,18 +46,33 @@ export class AuthService {
 
     const email = await this.resolverEmail(loginDto);
 
-    const { data, error } = await this.supabaseClient.auth.signInWithPassword({
+    const { data, error } = await this.authClient.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) throw new UnauthorizedException('Credenciales inválidas');
 
-      const perfil = await this.getUserFullProfile(data.user.id);
+    const perfil = await this.getUserFullProfile(data.user.id);
 
-    return {  
+    return {
       access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
       user: perfil,
+    };
+  }
+
+  // ----------------------------------------------------------------
+  // REFRESH
+  // ----------------------------------------------------------------
+  async refresh(refreshToken: string) {
+    const { data, error } = await this.authClient.auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+    if (error || !data.session) throw new UnauthorizedException('Sesión expirada');
+    return {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
     };
   }
 
@@ -57,16 +80,16 @@ export class AuthService {
   // REGISTER
   // Soporta registro con email real o sin email (genera ficticio)
   // ----------------------------------------------------------------
- async register(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto) {
     try {
-      const { password, role, nombre, apellido, documento } = registerDto;
+      const { password, nombre, apellido, documento } = registerDto;
+      // Nunca confiar en el rol que llega del cliente
+      const role = 'estudiante';
 
-      // Resolver email — real o ficticio
       const esFicticio = !registerDto.email;
       const email = registerDto.email?.toLowerCase().trim()
         ?? `cc-${documento}@casacultura.local`;
 
-      // Verificar duplicado por email o por documento
       const existe = await this.userRepository.findOne({
         where: [
           { email },
@@ -82,13 +105,13 @@ export class AuthService {
         );
       }
 
-      // Registrar en Supabase Auth
-      const { data, error } = await this.supabaseClient.auth.signUp({
+      // signUp con el cliente de auth, para no mezclar sesiones con las consultas admin
+      const { data, error } = await this.authClient.auth.signUp({
         email,
         password,
         options: {
           data: {
-            role:   role || 'estudiante',
+            role,
             nombre: nombre || '',
           },
         },
@@ -101,29 +124,22 @@ export class AuthService {
       }
 
       const userId = data.user!.id;
-      const rolNormalizado = this.normalizarRol(role || 'estudiante');
+      const rolNormalizado = this.normalizarRol(role);
 
-      // LE DAMOS UN PEQUEÑO RESPIRÓ A LA BD (Opcional, por si la replicación tarda milisegundos)
-      // Completar public.users con los datos adicionales
       try {
         await this.userRepository.update(userId, {
           apellido:      apellido ?? null,
           documento:     documento ?? null,
-          emailFicticio:  esFicticio,
+          emailFicticio: esFicticio,
         });
       } catch (dbError) {
         this.logger.error(`Error actualizando campos adicionales para ${userId}:`, dbError);
-        // No bloqueamos el flujo si el auth de Supabase fue exitoso
       }
 
-      // =================================================================
-      // ❌ BORRAMOS EL REPOSITORIO DE ROL DESDE AQUÍ ❌
-      // El trigger 'on_auth_user_created' de Supabase ya insertó esto por debajo.
-      // Intentar meterlo aquí causa el error de llave foránea / concurrencia.
-      // =================================================================
+      // El rol lo inserta el trigger 'on_auth_user_created' de Supabase.
 
       return {
-        access_token:  data.session?.access_token ?? null,
+        access_token: data.session?.access_token ?? null,
         user: {
           id:            userId,
           email,
@@ -153,7 +169,6 @@ export class AuthService {
       .single();
 
     if (error || !profile) {
-      // Fallback a public.users si la vista falla
       const user = await this.userRepository.findOne({
         where: { id: userId },
       });
@@ -161,8 +176,6 @@ export class AuthService {
       return user;
     }
 
-    // profile tendrá: { id, email, nombre, apellido, roles: ['admin','docente'],
-    //                   es_admin, es_docente, es_estudiante, ... }
     return profile;
   }
 
@@ -189,8 +202,6 @@ export class AuthService {
   // ----------------------------------------------------------------
   // HELPERS PRIVADOS
   // ----------------------------------------------------------------
-
-  // Resuelve el email para autenticar — directo o buscando por documento
   private async resolverEmail(loginDto: LoginDto): Promise<string> {
     if (loginDto.email) return loginDto.email.toLowerCase().trim();
 
@@ -201,22 +212,13 @@ export class AuthService {
       if (!user) {
         throw new UnauthorizedException('No existe un usuario con ese documento.');
       }
-      return user.email; // puede ser ficticio, Supabase lo maneja igual
+      return user.email;
     }
 
     throw new BadRequestException('Debes proporcionar email o documento.');
   }
 
-  // Normaliza 'profesor' → 'docente' para nuevos registros
   private normalizarRol(rol: string): string {
     return rol === 'profesor' ? 'docente' : rol;
   }
 }
-
-
- 
-  // update(id: number, updateAuthDto: UpdateAuthDto) {
-  //   return `This action updates a #${id} auth`;
-  // }
-
- 

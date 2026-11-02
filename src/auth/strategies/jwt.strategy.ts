@@ -9,7 +9,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly authService: AuthService) {
     super({
       // Extrae el token del header Authorization: Bearer <token>
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+  (req) => req?.cookies?.access_token ?? null,
+  ExtractJwt.fromAuthHeaderAsBearerToken(), // para seguir probando en Postman
+]),
      
       //secretOrKey: process.env.SUPABASE_JWT_SECRET!,
       

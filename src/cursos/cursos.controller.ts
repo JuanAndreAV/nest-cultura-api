@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Delete,
+  Controller, Get, Post, Put,Patch, Delete,
   Param, Body, Query, UseGuards,
 } from '@nestjs/common';
 import { CursosService } from './cursos.service';
@@ -82,4 +82,9 @@ export class CursosController {
   eliminarHorario(@Param('id') id: string) {
     return this.cursosService.eliminarHorario(id);
   }
+  @Patch('reasignar-docente')
+@Roles('admin')
+reasignarDocente(@Body() body: { desdeDocenteId: string; haciaDocenteId: string; periodoId?: string }) {
+  return this.cursosService.reasignarDocente(body.desdeDocenteId, body.haciaDocenteId, body.periodoId);
+}
 }

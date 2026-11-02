@@ -452,22 +452,27 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
   /**
    * Asignación manual de roles desde módulo administrativo.
    */
-  async actualizarRoles(usuarioId: string, dto: ActualizarRolesDto) {
-    const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
-    if (!usuario) throw new NotFoundException('Usuario no encontrado');
+  async actualizarRoles(usuarioId: string, dto: ActualizarRolesDto, actorId: string) {
+  const usuario = await this.userRepository.findOne({ where: { id: usuarioId } });
+  if (!usuario) throw new NotFoundException('Usuario no encontrado');
 
-    const rolesUnicos = Array.from(new Set(dto.roles));
+  const rolesUnicos = Array.from(new Set(dto.roles));
 
-    // 1. Guardar en Postgres
-    await this.userRepository.update(usuarioId, { roles: rolesUnicos as UserRole[] });
-
-    // 2. Sincronizar en Supabase Auth Admin
-    await this.supabase.auth.admin.updateUserById(usuarioId, {
-      app_metadata: { roles: rolesUnicos },
-    });
-
-    return { mensaje: 'Roles actualizados correctamente', roles: rolesUnicos };
+  if (!rolesUnicos.length) {
+    throw new BadRequestException('El usuario debe conservar al menos un rol.');
   }
+  if (IDS_PROTEGIDOS.has(usuarioId) && usuarioId !== actorId) {
+    throw new ForbiddenException('Este usuario está protegido.');
+  }
+  if (usuarioId === actorId && !rolesUnicos.includes(UserRole.ADMIN)) {
+    throw new BadRequestException('No puedes quitarte tu propio rol de admin.');
+  }
+
+  await this.userRepository.update(usuarioId, { roles: rolesUnicos as UserRole[] });
+  await this.supabase.auth.admin.updateUserById(usuarioId, { app_metadata: { roles: rolesUnicos } });
+
+  return { mensaje: 'Roles actualizados correctamente', roles: rolesUnicos };
+}
 
   /**
    * Consulta paginada desde la vista `v_usuarios_completo`.
@@ -661,7 +666,29 @@ async completarPerfil(usuarioId: string, dto: CompletarPerfilDto) {
     if (!usuario.genero) faltantes.push('genero');
     if (!usuario.estrato) faltantes.push('estrato');
     if (!usuario.eps) faltantes.push('eps');
+    
 
     return faltantes;
   }
+  async cambiarPassword(id: string, password: string, actorId: string) {
+  if (IDS_PROTEGIDOS.has(id) && id !== actorId) {
+    throw new ForbiddenException('Este usuario está protegido.');
+  }
+  const u = await this.userRepository.findOne({ where: { id } });
+  if (!u) throw new NotFoundException('Usuario no encontrado');
+
+  const { error } = await this.supabase.auth.admin.updateUserById(id, { password });
+  if (error) throw new BadRequestException(error.message);
+  return { mensaje: 'Contraseña actualizada.' };
+}
+
+async cambiarActivo(id: string, activo: boolean, actorId: string) {
+  if (IDS_PROTEGIDOS.has(id)) throw new ForbiddenException('Este usuario está protegido.');
+  if (!activo && id === actorId) throw new BadRequestException('No puedes desactivarte a ti mismo.');
+  const u = await this.userRepository.findOne({ where: { id } });
+  if (!u) throw new NotFoundException('Usuario no encontrado');
+
+  await this.userRepository.update(id, { activo });
+  return { mensaje: activo ? 'Usuario activado.' : 'Usuario desactivado.' };
+}
 }

@@ -28,7 +28,7 @@ export class RegisterDto {
   @IsString()
   documento?: string;
 
-  @IsEnum(['admin', 'docente', 'estudiante'])
-  @IsOptional()
-  role?: string;
-}
+//   @IsEnum(['admin', 'docente', 'estudiante'])
+//   @IsOptional()
+//   role?: string;
+ }

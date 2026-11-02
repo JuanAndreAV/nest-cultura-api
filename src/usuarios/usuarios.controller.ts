@@ -13,6 +13,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CompletarPerfilDocenteDto } from './dto/completa-perfil-docente.dto';
+import { ActivoDto, PasswordDto } from './dto/credenciales.dto';
 
 @Controller('usuarios')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -90,4 +91,23 @@ export class UsuariosController {
   eliminar(@Param('id', ParseUUIDPipe) id: string) {
     return this.usuariosService.eliminar(id);
   }
+  @Post(':id/password')
+@Roles('admin')
+cambiarPassword(
+  @Param('id', ParseUUIDPipe) id: string,
+  @Body() dto: PasswordDto,
+  @CurrentUser() user: any,
+) {
+  return this.usuariosService.cambiarPassword(id, dto.password, user.id);
+}
+
+@Patch(':id/activo')
+@Roles('admin')
+cambiarActivo(
+  @Param('id', ParseUUIDPipe) id: string,
+  @Body() dto: ActivoDto,
+  @CurrentUser() user: any,
+) {
+  return this.usuariosService.cambiarActivo(id, dto.activo, user.id);
+}
 }
