@@ -14,7 +14,7 @@ async function bootstrap() {
     {
       origin: [
         'http://localhost:4200',
-        'https://giaradotaescultura.web.app/'],
+        'https://giaradotaescultura.web.app'],
         credentials: true
       
       }
