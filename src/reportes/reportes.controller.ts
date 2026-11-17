@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { ReportesService } from './reportes.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -14,6 +14,13 @@ export class ReportesController {
   @Get('kpis')
   kpis() {
     return this.reportesService.kpis();
+  }
+
+  // Analítica poblacional e inscripciones — gráficas del dashboard
+  @Get('analitica')
+  @Roles('admin')
+  analitica(@Query('periodoId', new ParseUUIDPipe({ optional: true })) periodoId?: string) {
+    return this.reportesService.analitica(periodoId);
   }
 
   // Estado de todos los cursos
