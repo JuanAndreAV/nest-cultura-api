@@ -1,6 +1,7 @@
 import {
   Controller, Get, Post, Param,
   Body, Query, UseGuards, BadRequestException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AsistenciasService } from './asistencias.service';
 import { CreateAsistenciaDto, RegistroMasivoDto } from './dto/create-asistencia.dto';
@@ -65,5 +66,13 @@ resumenPorInscripcion(
   @CurrentUser() user: any,
 ) {
   return this.asistenciasService.resumenPorInscripcion(inscripcionId, user);
+}
+@Get('curso/:cursoId/lista')
+lista(
+  @Param('cursoId', ParseUUIDPipe) cursoId: string,
+  @Query('fecha') fecha: string,
+  @CurrentUser() user: any,
+) {
+  return this.asistenciasService.listaParaAsistencia(cursoId, fecha, user);
 }
 }

@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Curso } from './entities/curso.entity';
 import { Horario } from './entities/horario.entity';
 import { CreateCursoDto, CreateHorarioDto } from './dto/create-curso.dto';
+import { UpdateCursoDto } from './dto/update-curso.dto';
 
 @Injectable()
 export class CursosService {
@@ -105,30 +106,58 @@ export class CursosService {
     return curso;
   }
 
-  async actualizar(id: string, dto: Partial<CreateCursoDto>): Promise<Curso> {
+  async actualizar(id: string, dto: UpdateCursoDto): Promise<Curso> {
     const curso = await this.cursoRepository.findOne({ where: { id } });
     if (!curso) throw new NotFoundException('Curso no encontrado');
 
-    if (dto.edadMin && dto.edadMax && dto.edadMax < dto.edadMin) {
+    const edadMin = dto.edadMin !== undefined ? dto.edadMin : curso.edadMin;
+    const edadMax = dto.edadMax !== undefined ? dto.edadMax : curso.edadMax;
+    if (edadMin != null && edadMax != null && edadMax < edadMin) {
       throw new BadRequestException('La edad máxima debe ser mayor a la mínima.');
     }
 
+    // Solo se copian los campos que vienen en el body (incluye 0, '' y null)
+    const campos: (keyof UpdateCursoDto & keyof Curso)[] = [
+      'asignaturaId', 'periodoId', 'docenteId', 'nombre', 'descripcion',
+      'capacidadMax', 'edadMin', 'edadMax', 'intensidadHoraria',
+      'porcentajeAsistenciaMin', 'notaAprobatoria', 'requiereNivelPrevio',
+      'cursoPrerequisitoId',
+    ];
+    const cambios: Partial<Curso> = {};
+    for (const campo of campos) {
+      if (dto[campo] !== undefined) (cambios as any)[campo] = dto[campo];
+    }
+
     try {
-      Object.assign(curso, {
-        ...(dto.nombre                  && { nombre: dto.nombre }),
-        ...(dto.descripcion             && { descripcion: dto.descripcion }),
-        ...(dto.docenteId !== undefined && {docenteId: dto.docenteId}),
-        ...(dto.capacidadMax            && { capacidadMax: dto.capacidadMax }),
-        ...(dto.edadMin                 && { edadMin: dto.edadMin }),
-        ...(dto.edadMax                 && { edadMax: dto.edadMax }),
-        ...(dto.intensidadHoraria       && { intensidadHoraria: dto.intensidadHoraria }),
-        ...(dto.porcentajeAsistenciaMin && { porcentajeAsistenciaMin: dto.porcentajeAsistenciaMin }),
-        ...(dto.notaAprobatoria         && { notaAprobatoria: dto.notaAprobatoria }),
-        ...(dto.requiereNivelPrevio !== undefined && { requiereNivelPrevio: dto.requiereNivelPrevio }),
-        ...(dto.cursoPrerequisitoId     && { cursoPrerequisitoId: dto.cursoPrerequisitoId }),
+      await this.cursoRepository.manager.transaction(async (em) => {
+        if (Object.keys(cambios).length) {
+          await em.update(Curso, id, cambios);
+        }
+
+        // Si se envían horarios, reemplazan a los existentes
+        if (dto.horarios !== undefined) {
+          await em.delete(Horario, { cursoId: id });
+          if (dto.horarios.length) {
+            try {
+              await em.save(
+                Horario,
+                dto.horarios.map((h) =>
+                  em.create(Horario, {
+                    cursoId:    id,
+                    aulaId:     h.aulaId ?? null,
+                    diaSemana:  h.diaSemana,
+                    horaInicio: h.horaInicio,
+                    horaFin:    h.horaFin,
+                  }),
+                ),
+              );
+            } catch (error) {
+              this.manejarErrorHorario(error);
+            }
+          }
+        }
       });
 
-      await this.cursoRepository.save(curso);
       return await this.ver(id);
     } catch (error) {
       this.manejarErrorGeneral(error);
@@ -443,5 +472,12 @@ async reasignarDocente(desdeId: string, haciaId: string, periodoId?: string) {
 
   const r = await qb.execute();
   return { mensaje: `${r.affected ?? 0} curso(s) reasignado(s).`, afectados: r.affected ?? 0 };
+}
+async misCursos(docenteId: string): Promise<Curso[]> {
+  return this.cursoRepository.find({
+    where: { docenteId, activo: true, periodo: { activo: true } },
+    relations: ['asignatura', 'periodo', 'horarios', 'horarios.aula'],
+    order: { nombre: 'ASC' },
+  });
 }
 }

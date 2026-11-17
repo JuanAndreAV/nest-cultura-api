@@ -57,7 +57,9 @@ export class CreateCursoDto {
   @IsOptional()
   intensidadHoraria?: number;
 
-  @IsNumber()
+  @IsInt({ message: 'El % de asistencia mínima debe ser un número entero.' })
+  @Min(0)
+  @Max(100)
   @IsOptional()
   porcentajeAsistenciaMin?: number;
 
